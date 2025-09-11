@@ -34,8 +34,14 @@ jobs:
 
     - name: Start VNC + noVNC + Cloudflare Tunnel
       run: |
-        Write-Host "🚀 Запускаем VNC сервер..."
+        Write-Host "🚀 Настраиваем VNC сервер..."
         & "C:\Program Files\TightVNC\tvnserver.exe" -controlapp -password 123456
+        & "C:\Program Files\TightVNC\tvnserver.exe" -controlapp -AcceptRfbConnections=1
+        & "C:\Program Files\TightVNC\tvnserver.exe" -controlapp -LoopbackOnly=0
+        & "C:\Program Files\TightVNC\tvnserver.exe" -controlapp -AcceptHttpConnections=1
+        & "C:\Program Files\TightVNC\tvnserver.exe" -controlapp -RfbPort=5900
+        
+        Write-Host "🚀 Запускаем VNC сервер..."
         & "C:\Program Files\TightVNC\tvnserver.exe" -run
 
         Write-Host "🚀 Запускаем websockify + noVNC..."
