@@ -41,7 +41,8 @@ jobs:
         Write-Host "🌐 Настраиваем Guacamole веб-интерфейс..."
         
         # Создаем простой HTML5 RDP клиент
-        $guacamoleHtml = @"
+        Write-Host "🔧 Создаем HTML интерфейс..."
+        $htmlContent = @'
 <!DOCTYPE html>
 <html lang="en">
 <head>
@@ -52,7 +53,6 @@ jobs:
         body { margin: 0; padding: 20px; font-family: Arial, sans-serif; background: #2c3e50; color: white; }
         .container { max-width: 1200px; margin: 0 auto; }
         .header { text-align: center; margin-bottom: 20px; }
-        .rdp-frame { width: 100%; height: 600px; border: 2px solid #34495e; border-radius: 8px; }
         .info { background: #34495e; padding: 15px; border-radius: 8px; margin-bottom: 20px; }
         .credentials { display: grid; grid-template-columns: repeat(auto-fit, minmax(250px, 1fr)); gap: 10px; }
         .cred-item { background: #2c3e50; padding: 10px; border-radius: 4px; }
@@ -64,101 +64,40 @@ jobs:
 <body>
     <div class="container">
         <div class="header">
-            <h1>🖥️ Windows Desktop Access</h1>
+            <h1>Windows Desktop Access</h1>
             <p>Подключение к удаленному рабочему столу Windows</p>
         </div>
         
         <div class="info">
-            <h3>📋 Данные для подключения:</h3>
+            <h3>Данные для подключения:</h3>
             <div class="credentials">
                 <div class="cred-item">
-                    <strong>🌐 Сервер:</strong> localhost:3389
+                    <strong>Сервер:</strong> localhost:3389
                 </div>
                 <div class="cred-item">
-                    <strong>👤 Пользователь:</strong> runneradmin
+                    <strong>Пользователь:</strong> runneradmin
                 </div>
                 <div class="cred-item">
-                    <strong>🔑 Пароль:</strong> Desktop2024!
+                    <strong>Пароль:</strong> Desktop2024!
                 </div>
                 <div class="cred-item">
-                    <strong>🖼️ Разрешение:</strong> 1024x768
+                    <strong>Разрешение:</strong> 1024x768
                 </div>
             </div>
         </div>
         
         <div class="info">
-            <h3>🚀 Способы подключения:</h3>
+            <h3>Способы подключения:</h3>
             <div class="download-links">
-                <a href="#" onclick="connectRDP()">🌐 Веб RDP (HTML5)</a>
-                <a href="rdp://runneradmin:Desktop2024!@localhost:3389">📱 Открыть в RDP клиенте</a>
-                <a href="#" onclick="downloadRDP()">💾 Скачать .rdp файл</a>
+                <a href="#" onclick="downloadRDP()">Скачать .rdp файл</a>
+                <a href="rdp://runneradmin:Desktop2024!@localhost:3389">Открыть в RDP клиенте</a>
             </div>
-        </div>
-        
-        <iframe id="rdpFrame" class="rdp-frame" src="about:blank" style="display:none;"></iframe>
-        
-        <div id="webRDP" style="display:none;">
-            <h3>🌐 Веб RDP клиент загружается...</h3>
-            <p>Если не загружается, используйте стандартный RDP клиент вашей ОС.</p>
         </div>
     </div>
     
     <script>
-        function connectRDP() {
-            document.getElementById('webRDP').style.display = 'block';
-            // Здесь можно добавить веб RDP клиент
-            alert('Используйте RDP клиент вашей ОС для подключения к localhost:3389');
-        }
-        
         function downloadRDP() {
-            const rdpContent = `screen mode id:i:2
-use multimon:i:0
-desktopwidth:i:1024
-desktopheight:i:768
-session bpp:i:32
-winposstr:s:0,3,0,0,800,600
-compression:i:1
-keyboardhook:i:2
-audiocapturemode:i:0
-videoplaybackmode:i:1
-connection type:i:7
-networkautodetect:i:1
-bandwidthautodetect:i:1
-displayconnectionbar:i:1
-enableworkspacereconnect:i:0
-disable wallpaper:i:0
-allow font smoothing:i:0
-allow desktop composition:i:0
-disable full window drag:i:1
-disable menu anims:i:1
-disable themes:i:0
-disable cursor setting:i:0
-bitmapcachepersistenable:i:1
-full address:s:localhost:3389
-audiomode:i:0
-redirectprinters:i:1
-redirectcomports:i:0
-redirectsmartcards:i:1
-redirectclipboard:i:1
-redirectposdevices:i:0
-autoreconnection enabled:i:1
-authentication level:i:2
-prompt for credentials:i:0
-negotiate security layer:i:1
-remoteapplicationmode:i:0
-alternate shell:s:
-shell working directory:s:
-gatewayhostname:s:
-gatewayusagemethod:i:4
-gatewaycredentialssource:i:4
-gatewayprofileusagemethod:i:0
-promptcredentialonce:i:0
-gatewaybrokeringtype:i:0
-use redirection server name:i:0
-rdgiskdcproxy:i:0
-kdcproxyname:s:
-username:s:runneradmin`;
-            
+            const rdpContent = 'screen mode id:i:2\ndesktopwidth:i:1024\ndesktopheight:i:768\nsession bpp:i:32\nfull address:s:localhost:3389\nusername:s:runneradmin';
             const blob = new Blob([rdpContent], { type: 'application/rdp' });
             const url = window.URL.createObjectURL(blob);
             const a = document.createElement('a');
@@ -172,10 +111,10 @@ username:s:runneradmin`;
     </script>
 </body>
 </html>
-"@
+'@
         
         # Сохраняем HTML файл
-        $guacamoleHtml | Out-File -FilePath "$env:USERPROFILE\guacamole.html" -Encoding UTF8
+        $htmlContent | Out-File -FilePath "$env:USERPROFILE\guacamole.html" -Encoding UTF8
         Write-Host "✅ Guacamole веб-интерфейс создан"
 
     - name: Setup Python HTTP Server
