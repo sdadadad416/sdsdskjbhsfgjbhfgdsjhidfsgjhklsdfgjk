@@ -238,9 +238,13 @@ jobs:
         
         # Запускаем cloudflared туннель в фоне
         Write-Host "🔗 Создаем туннель на trycloudflare.com..."
+        $logFile = "$env:TEMP\cloudflared.log"
+        
+        # Запускаем в фоне с логированием
         $tunnelJob = Start-Job -ScriptBlock {
-            & "$env:USERPROFILE\cloudflared.exe" tunnel --url http://localhost:6080
-        }
+            param($cloudflaredPath, $logPath)
+            & $cloudflaredPath tunnel --url http://localhost:6080 2>&1 | Tee-Object -FilePath $logPath
+        } -ArgumentList "$env:USERPROFILE\cloudflared.exe", $logFile
         
         Start-Sleep -Seconds 30
         
@@ -254,27 +258,46 @@ jobs:
         
         # Получаем URL туннеля (несколько попыток)
         $tunnelUrl = $null
-        for ($i = 1; $i -le 5; $i++) {
+        for ($i = 1; $i -le 8; $i++) {
             Write-Host "🔍 Попытка $i получить URL туннеля..."
+            
+            # Проверяем вывод job
             $tunnelOutput = Receive-Job -Id $tunnelJob.Id -Keep
             if ($tunnelOutput) {
-                Write-Host "📋 Вывод Cloudflare Tunnel:"
                 $tunnelOutput | ForEach-Object { 
                     Write-Host $_
-                    if ($_ -match "https://.*\.trycloudflare\.com") {
+                    if ($_ -match "https://[a-zA-Z0-9\-]+\.trycloudflare\.com") {
                         $tunnelUrl = $matches[0]
-                        Write-Host "🎯 Найден URL: $tunnelUrl"
+                        Write-Host "🎯 Найден URL в job: $tunnelUrl"
                     }
                 }
-                if ($tunnelUrl) { break }
             }
-            Start-Sleep -Seconds 10
+            
+            # Проверяем лог файл
+            if (Test-Path $logFile) {
+                $logContent = Get-Content $logFile -ErrorAction SilentlyContinue
+                if ($logContent) {
+                    $logContent | ForEach-Object { 
+                        if ($_ -match "https://[a-zA-Z0-9\-]+\.trycloudflare\.com") {
+                            $tunnelUrl = $matches[0]
+                            Write-Host "🎯 Найден URL в логе: $tunnelUrl"
+                        }
+                    }
+                }
+            }
+            
+            if ($tunnelUrl) { break }
+            Start-Sleep -Seconds 15
         }
         
         if (-not $tunnelUrl) {
-            Write-Host "⚠️ URL не найден в выводе, но туннель может работать"
-            Write-Host "📋 Полный вывод Cloudflare:"
+            Write-Host "⚠️ URL не найден, показываем все логи:"
+            Write-Host "📋 Вывод Job:"
             Receive-Job -Id $tunnelJob.Id -Keep | ForEach-Object { Write-Host $_ }
+            if (Test-Path $logFile) {
+                Write-Host "📋 Содержимое лог файла:"
+                Get-Content $logFile | ForEach-Object { Write-Host $_ }
+            }
         }
         
         # Выводим информацию для подключения
@@ -305,12 +328,11 @@ jobs:
         Write-Host "🛑 Для остановки прервите выполнение workflow"
         Write-Host "📊 Туннель будет работать в течение ~6 часов"
         
-        # Основной цикл поддержания работы
+        # Основной цикл поддержания работы (бесконечный)
         $startTime = Get-Date
-        $maxRunTime = New-TimeSpan -Hours 5 -Minutes 50
         $lastCheck = Get-Date
         
-        while ((Get-Date) - $startTime -lt $maxRunTime) {
+        while ($true) {
             try {
                 # Проверяем каждые 3 минуты
                 if ((Get-Date) - $lastCheck -gt (New-TimeSpan -Minutes 3)) {
@@ -321,16 +343,24 @@ jobs:
                         Write-Host "⚠️ Cloudflare tunnel остановлен, перезапускаем..."
                         Remove-Job -Id $tunnelJob -Force -ErrorAction SilentlyContinue
                         
+                        # Перезапускаем туннель
                         $tunnelJob = Start-Job -ScriptBlock {
-                            & "$env:USERPROFILE\cloudflared.exe" tunnel --url http://localhost:6080
-                        }
-                        Start-Sleep -Seconds 15
+                            param($cloudflaredPath, $logPath)
+                            & $cloudflaredPath tunnel --url http://localhost:6080 2>&1 | Tee-Object -FilePath $logPath
+                        } -ArgumentList "$env:USERPROFILE\cloudflared.exe", $logFile
+                        
+                        Start-Sleep -Seconds 20
                         
                         # Показываем новый URL
                         $newOutput = Receive-Job -Id $tunnelJob -Keep
                         if ($newOutput) {
-                            Write-Host "🔗 Новый URL Cloudflare:"
-                            $newOutput | ForEach-Object { Write-Host $_ }
+                            Write-Host "🔗 Новый вывод Cloudflare:"
+                            $newOutput | ForEach-Object { 
+                                Write-Host $_
+                                if ($_ -match "https://[a-zA-Z0-9\-]+\.trycloudflare\.com") {
+                                    Write-Host "🎯 Новый URL: $($matches[0])"
+                                }
+                            }
                         }
                     }
                     
@@ -360,5 +390,6 @@ jobs:
             }
         }
         
-        Write-Host "⏰ Время выполнения истекло, завершаем работу..."
+        # Этот код никогда не выполнится, так как цикл бесконечный
+        Write-Host "⏰ Завершаем работу..."
         Remove-Job -Id $tunnelJob -Force -ErrorAction SilentlyContinue
