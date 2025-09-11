@@ -242,42 +242,63 @@ jobs:
             & "$env:USERPROFILE\cloudflared.exe" tunnel --url http://localhost:6080
         }
         
-        Start-Sleep -Seconds 20
+        Start-Sleep -Seconds 30
         
         # Проверяем статус tunnel job
         $jobState = Get-Job -Id $tunnelJob.Id | Select-Object -ExpandProperty State
         if ($jobState -eq "Running") {
             Write-Host "✅ Cloudflare туннель успешно запущен!"
-            
-            # Получаем URL туннеля
+        } else {
+            Write-Host "❌ Ошибка запуска Cloudflare Tunnel"
+        }
+        
+        # Получаем URL туннеля (несколько попыток)
+        $tunnelUrl = $null
+        for ($i = 1; $i -le 5; $i++) {
+            Write-Host "🔍 Попытка $i получить URL туннеля..."
             $tunnelOutput = Receive-Job -Id $tunnelJob.Id -Keep
             if ($tunnelOutput) {
                 Write-Host "📋 Вывод Cloudflare Tunnel:"
                 $tunnelOutput | ForEach-Object { 
                     Write-Host $_
                     if ($_ -match "https://.*\.trycloudflare\.com") {
-                        $global:tunnelUrl = $matches[0]
+                        $tunnelUrl = $matches[0]
+                        Write-Host "🎯 Найден URL: $tunnelUrl"
                     }
                 }
+                if ($tunnelUrl) { break }
             }
-        } else {
-            Write-Host "❌ Ошибка запуска Cloudflare Tunnel"
-            Receive-Job -Id $tunnelJob.Id
+            Start-Sleep -Seconds 10
+        }
+        
+        if (-not $tunnelUrl) {
+            Write-Host "⚠️ URL не найден в выводе, но туннель может работать"
+            Write-Host "📋 Полный вывод Cloudflare:"
+            Receive-Job -Id $tunnelJob.Id -Keep | ForEach-Object { Write-Host $_ }
         }
         
         # Выводим информацию для подключения
         Write-Host ""
-        Write-Host "=" * 60
-        Write-Host "🌐 ИНФОРМАЦИЯ ДЛЯ ПОДКЛЮЧЕНИЯ К DESKTOP"
-        Write-Host "=" * 60
-        Write-Host "🔗 Веб-интерфейс: Смотрите URL выше в логах Cloudflare"
-        Write-Host "🔗 Формат: https://[random].trycloudflare.com"
+        Write-Host "=" * 70
+        Write-Host "🌐 ИНФОРМАЦИЯ ДЛЯ ПОДКЛЮЧЕНИЯ К WINDOWS DESKTOP"
+        Write-Host "=" * 70
+        if ($tunnelUrl) {
+            Write-Host "🔗 ПРЯМАЯ ССЫЛКА: $tunnelUrl"
+            Write-Host "🎯 Скопируйте эту ссылку и откройте в браузере!"
+        } else {
+            Write-Host "🔗 Веб-интерфейс: Смотрите URL выше в логах Cloudflare"
+            Write-Host "� оФормат: https://[random].trycloudflare.com"
+        }
+        Write-Host ""
         Write-Host "🔐 VNC Пароль: vnc123456"
         Write-Host "👤 Windows Пользователь: runneradmin"
         Write-Host "🔑 Windows Пароль: Desktop2024!"
+        Write-Host ""
         Write-Host "💻 Откройте URL в браузере для доступа к рабочему столу"
         Write-Host "🎮 Полная поддержка клавиатуры и мыши"
-        Write-Host "=" * 60
+        Write-Host "🌍 Работает в любом браузере (Chrome, Firefox, Safari, Edge)"
+        Write-Host "📱 Даже на мобильных устройствах!"
+        Write-Host "=" * 70
         Write-Host ""
         
         Write-Host "⏰ Поддерживаем работу туннеля..."
