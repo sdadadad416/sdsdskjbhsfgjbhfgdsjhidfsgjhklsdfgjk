@@ -210,7 +210,15 @@ jobs:
             Write-Host "Target: localhost:5900"
             Write-Host "Listen: 6080"
             
-            python -m websockify --web="$novncPath" --verbose 6080 localhost:5900
+            # Пробуем разные варианты запуска
+            try {
+                Write-Host "Попытка 1: python -m websockify"
+                python -m websockify --web="$novncPath" --verbose 6080 localhost:5900
+            } catch {
+                Write-Host "Ошибка способа 1: $($_.Exception.Message)"
+                Write-Host "Попытка 2: websockify напрямую"
+                & websockify --web="$novncPath" --verbose 6080 localhost:5900
+            }
         } -ArgumentList "$env:USERPROFILE\novnc"
         
         Start-Sleep -Seconds 20
@@ -251,10 +259,44 @@ jobs:
         $websocket = Get-NetTCPConnection -LocalPort 6080 -ErrorAction SilentlyContinue
         if ($websocket) {
             Write-Host "✅ Websockify слушает порт 6080"
+            
+            # Тестируем HTTP подключение к websockify
+            Write-Host "🔍 Тестируем HTTP подключение к websockify..."
+            try {
+                $response = Invoke-WebRequest -Uri "http://localhost:6080" -TimeoutSec 10 -ErrorAction Stop
+                Write-Host "✅ HTTP ответ от websockify: $($response.StatusCode)"
+                Write-Host "📄 Content-Type: $($response.Headers.'Content-Type')"
+            } catch {
+                Write-Host "❌ Ошибка HTTP подключения к websockify: $($_.Exception.Message)"
+            }
+            
+            # Проверяем NoVNC файлы
+            Write-Host "🔍 Проверяем NoVNC файлы..."
+            $novncFiles = @(
+                "$env:USERPROFILE\novnc\vnc.html",
+                "$env:USERPROFILE\novnc\index.html",
+                "$env:USERPROFILE\novnc\app\ui.js"
+            )
+            foreach ($file in $novncFiles) {
+                if (Test-Path $file) {
+                    Write-Host "✅ Найден: $file"
+                } else {
+                    Write-Host "❌ Отсутствует: $file"
+                }
+            }
+            
+            # Показываем содержимое папки NoVNC
+            Write-Host "📁 Содержимое папки NoVNC:"
+            Get-ChildItem "$env:USERPROFILE\novnc" | Select-Object Name, Length | Format-Table
+            
         } else {
             Write-Host "❌ Websockify не слушает порт 6080"
             Write-Host "🔍 Проверяем активные порты:"
             Get-NetTCPConnection | Where-Object {$_.LocalPort -like "60*"} | Format-Table LocalAddress,LocalPort,State
+            
+            # Показываем ошибки websockify
+            Write-Host "📋 Ошибки websockify:"
+            Receive-Job -Id $websockifyJob.Id | ForEach-Object { Write-Host "Websockify: $_" }
         }
 
     - name: Start Cloudflare Tunnel and Keep Alive
