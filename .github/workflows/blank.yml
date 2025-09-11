@@ -36,86 +36,22 @@ jobs:
         }
         Start-Sleep -Seconds 5
 
-    - name: Setup Guacamole (без Docker)
+    - name: Setup Web Interface
       run: |
-        Write-Host "🌐 Настраиваем Guacamole веб-интерфейс..."
+        Write-Host "🌐 Создаем веб-интерфейс..."
         
-        # Создаем простой HTML5 RDP клиент
-        Write-Host "🔧 Создаем HTML интерфейс..."
-        $htmlContent = @'
-<!DOCTYPE html>
-<html lang="en">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Windows Desktop - RDP Client</title>
-    <style>
-        body { margin: 0; padding: 20px; font-family: Arial, sans-serif; background: #2c3e50; color: white; }
-        .container { max-width: 1200px; margin: 0 auto; }
-        .header { text-align: center; margin-bottom: 20px; }
-        .info { background: #34495e; padding: 15px; border-radius: 8px; margin-bottom: 20px; }
-        .credentials { display: grid; grid-template-columns: repeat(auto-fit, minmax(250px, 1fr)); gap: 10px; }
-        .cred-item { background: #2c3e50; padding: 10px; border-radius: 4px; }
-        .download-links { margin-top: 20px; }
-        .download-links a { color: #3498db; text-decoration: none; margin-right: 15px; }
-        .download-links a:hover { text-decoration: underline; }
-    </style>
-</head>
-<body>
-    <div class="container">
-        <div class="header">
-            <h1>Windows Desktop Access</h1>
-            <p>Подключение к удаленному рабочему столу Windows</p>
-        </div>
+        # Создаем простой HTML файл по частям
+        $htmlStart = '<!DOCTYPE html><html><head><meta charset="UTF-8"><title>Windows Desktop</title>'
+        $htmlStyle = '<style>body{margin:0;padding:20px;font-family:Arial;background:#2c3e50;color:white}.container{max-width:800px;margin:0 auto}.info{background:#34495e;padding:15px;margin:10px 0;border-radius:8px}.cred{background:#2c3e50;padding:10px;margin:5px 0}a{color:#3498db;text-decoration:none;margin-right:15px}</style>'
+        $htmlBody = '</head><body><div class="container"><h1>Windows Desktop Access</h1><div class="info"><h3>Данные для подключения:</h3><div class="cred"><strong>Сервер:</strong> localhost:3389</div><div class="cred"><strong>Пользователь:</strong> runneradmin</div><div class="cred"><strong>Пароль:</strong> Desktop2024!</div></div><div class="info"><h3>Способы подключения:</h3><a href="#" onclick="downloadRDP()">Скачать .rdp файл</a><a href="rdp://runneradmin:Desktop2024!@localhost:3389">Открыть RDP</a></div></div>'
+        $htmlScript = '<script>function downloadRDP(){const content="screen mode id:i:2\ndesktopwidth:i:1024\ndesktopheight:i:768\nfull address:s:localhost:3389\nusername:s:runneradmin";const blob=new Blob([content],{type:"application/rdp"});const url=URL.createObjectURL(blob);const a=document.createElement("a");a.href=url;a.download="windows.rdp";a.click();URL.revokeObjectURL(url);}</script>'
+        $htmlEnd = '</body></html>'
         
-        <div class="info">
-            <h3>Данные для подключения:</h3>
-            <div class="credentials">
-                <div class="cred-item">
-                    <strong>Сервер:</strong> localhost:3389
-                </div>
-                <div class="cred-item">
-                    <strong>Пользователь:</strong> runneradmin
-                </div>
-                <div class="cred-item">
-                    <strong>Пароль:</strong> Desktop2024!
-                </div>
-                <div class="cred-item">
-                    <strong>Разрешение:</strong> 1024x768
-                </div>
-            </div>
-        </div>
+        # Объединяем и сохраняем
+        $fullHtml = $htmlStart + $htmlStyle + $htmlBody + $htmlScript + $htmlEnd
+        $fullHtml | Out-File -FilePath "$env:USERPROFILE\index.html" -Encoding UTF8
         
-        <div class="info">
-            <h3>Способы подключения:</h3>
-            <div class="download-links">
-                <a href="#" onclick="downloadRDP()">Скачать .rdp файл</a>
-                <a href="rdp://runneradmin:Desktop2024!@localhost:3389">Открыть в RDP клиенте</a>
-            </div>
-        </div>
-    </div>
-    
-    <script>
-        function downloadRDP() {
-            const rdpContent = 'screen mode id:i:2\ndesktopwidth:i:1024\ndesktopheight:i:768\nsession bpp:i:32\nfull address:s:localhost:3389\nusername:s:runneradmin';
-            const blob = new Blob([rdpContent], { type: 'application/rdp' });
-            const url = window.URL.createObjectURL(blob);
-            const a = document.createElement('a');
-            a.href = url;
-            a.download = 'windows-desktop.rdp';
-            document.body.appendChild(a);
-            a.click();
-            document.body.removeChild(a);
-            window.URL.revokeObjectURL(url);
-        }
-    </script>
-</body>
-</html>
-'@
-        
-        # Сохраняем HTML файл
-        $htmlContent | Out-File -FilePath "$env:USERPROFILE\guacamole.html" -Encoding UTF8
-        Write-Host "✅ Guacamole веб-интерфейс создан"
+        Write-Host "✅ Веб-интерфейс создан"
 
     - name: Setup Python HTTP Server
       run: |
@@ -286,11 +222,11 @@ jobs:
         Write-Host "🌐 ИНФОРМАЦИЯ ДЛЯ ПОДКЛЮЧЕНИЯ К WINDOWS DESKTOP"
         Write-Host "=" * 70
         if ($tunnelUrl) {
-            Write-Host "🔗 ПРЯМАЯ ССЫЛКА: $tunnelUrl/guacamole.html"
+            Write-Host "🔗 ПРЯМАЯ ССЫЛКА: $tunnelUrl"
             Write-Host "🎯 Скопируйте эту ссылку и откройте в браузере!"
         } else {
             Write-Host "🔗 Веб-интерфейс: Смотрите URL выше в логах Cloudflare"
-            Write-Host "🔗 Добавьте /guacamole.html к URL"
+            Write-Host "🔗 Откройте URL в браузере"
         }
         Write-Host ""
         Write-Host "📋 Данные для RDP подключения:"
@@ -339,7 +275,7 @@ jobs:
                             $newOutput | ForEach-Object { 
                                 Write-Host $_
                                 if ($_ -match "https://[a-zA-Z0-9\-]+\.trycloudflare\.com") {
-                                    Write-Host "🎯 Новый URL: $($matches[0])/guacamole.html"
+                                    Write-Host "🎯 Новый URL: $($matches[0])"
                                 }
                             }
                         }
