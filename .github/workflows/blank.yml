@@ -52,6 +52,19 @@ jobs:
         Expand-Archive -Path "$env:TEMP\novnc.zip" -DestinationPath "$env:USERPROFILE" -Force
         Rename-Item -Path "$env:USERPROFILE\noVNC-1.4.0" -NewName "novnc" -Force
         
+        # Создаем index.html как копию vnc.html
+        Write-Host "🔧 Создаем index.html..."
+        if (Test-Path "$env:USERPROFILE\novnc\vnc.html") {
+            Copy-Item -Path "$env:USERPROFILE\novnc\vnc.html" -Destination "$env:USERPROFILE\novnc\index.html" -Force
+            Write-Host "✅ index.html создан"
+        }
+        
+        # Создаем конфигурационный файл для websockify
+        Write-Host "🔧 Создаем конфиг для websockify..."
+        $tokenConfig = "default: localhost:5900"
+        $tokenConfig | Out-File -FilePath "$env:USERPROFILE\novnc\vnc_tokens.txt" -Encoding ASCII
+        Write-Host "✅ Конфиг создан"
+        
         Write-Host "📥 Скачиваем websockify..."
         Invoke-WebRequest -Uri "https://github.com/novnc/websockify/archive/refs/tags/v0.11.0.zip" -OutFile "$env:TEMP\websockify.zip"
         Expand-Archive -Path "$env:TEMP\websockify.zip" -DestinationPath "$env:USERPROFILE" -Force
@@ -210,15 +223,9 @@ jobs:
             Write-Host "Target: localhost:5900"
             Write-Host "Listen: 6080"
             
-            # Пробуем разные варианты запуска
-            try {
-                Write-Host "Попытка 1: python -m websockify"
-                python -m websockify --web="$novncPath" --verbose 6080 localhost:5900
-            } catch {
-                Write-Host "Ошибка способа 1: $($_.Exception.Message)"
-                Write-Host "Попытка 2: websockify напрямую"
-                & websockify --web="$novncPath" --verbose 6080 localhost:5900
-            }
+            # Запускаем websockify с правильными параметрами для NoVNC
+            Write-Host "Запуск websockify для NoVNC..."
+            python -m websockify --web="$novncPath" --verbose --target-config="$novncPath\vnc_tokens.txt" 6080 localhost:5900
         } -ArgumentList "$env:USERPROFILE\novnc"
         
         Start-Sleep -Seconds 20
