@@ -192,32 +192,57 @@ jobs:
             Write-Host "❌ NoVNC не найден"
         }
         
-        # Запускаем websockify в фоне используя pip версию
-        Write-Host "🚀 Запускаем websockify..."
-        $websockifyJob = Start-Job -ScriptBlock {
-            python -m websockify --web="$env:USERPROFILE\novnc" 6080 localhost:5900
+        # Проверяем что VNC работает перед запуском websockify
+        Write-Host "� Проуверяем VNC перед запуском websockify..."
+        $vncCheck = Get-NetTCPConnection -LocalPort 5900 -ErrorAction SilentlyContinue
+        if ($vncCheck) {
+            Write-Host "✅ VNC работает на порту 5900"
+        } else {
+            Write-Host "❌ VNC не работает на порту 5900!"
         }
         
-        Start-Sleep -Seconds 15
+        # Запускаем websockify в фоне с подробными логами
+        Write-Host "🚀 Запускаем websockify..."
+        $websockifyJob = Start-Job -ScriptBlock {
+            param($novncPath)
+            Write-Host "Запуск websockify с параметрами:"
+            Write-Host "NoVNC path: $novncPath"
+            Write-Host "Target: localhost:5900"
+            Write-Host "Listen: 6080"
+            
+            python -m websockify --web="$novncPath" --verbose 6080 localhost:5900
+        } -ArgumentList "$env:USERPROFILE\novnc"
         
-        # Проверяем статус
+        Start-Sleep -Seconds 20
+        
+        # Проверяем статус с подробной диагностикой
         $jobState = Get-Job -Id $websockifyJob.Id | Select-Object -ExpandProperty State
+        Write-Host "📊 Статус websockify job: $jobState"
+        
         if ($jobState -eq "Running") {
-            Write-Host "✅ NoVNC websockify запущен на порту 6080!"
+            Write-Host "✅ NoVNC websockify запущен!"
         } else {
             Write-Host "❌ Ошибка запуска websockify через pip:"
-            Receive-Job -Id $websockifyJob.Id
+            $jobOutput = Receive-Job -Id $websockifyJob.Id
+            $jobOutput | ForEach-Object { Write-Host "Job Output: $_" }
             
-            # Пробуем альтернативный способ с локальными файлами
-            Write-Host "🔄 Пробуем с локальными файлами..."
-            if (Test-Path "$env:USERPROFILE\websockify\websockify.py") {
-                $websockifyJob = Start-Job -ScriptBlock {
-                    Set-Location "$env:USERPROFILE\websockify"
-                    python websockify.py --web="$env:USERPROFILE\novnc" 6080 localhost:5900
-                }
-                Start-Sleep -Seconds 10
-            } else {
-                Write-Host "❌ Локальный websockify.py не найден"
+            # Пробуем альтернативный способ
+            Write-Host "🔄 Пробуем альтернативный запуск..."
+            Remove-Job -Id $websockifyJob.Id -Force -ErrorAction SilentlyContinue
+            
+            $websockifyJob = Start-Job -ScriptBlock {
+                param($novncPath)
+                Set-Location "$novncPath\utils"
+                python websockify.py --web=.. --verbose 6080 localhost:5900
+            } -ArgumentList "$env:USERPROFILE\novnc"
+            
+            Start-Sleep -Seconds 15
+            $altJobState = Get-Job -Id $websockifyJob.Id | Select-Object -ExpandProperty State
+            Write-Host "📊 Альтернативный статус: $altJobState"
+            
+            if ($altJobState -ne "Running") {
+                Write-Host "❌ Альтернативный способ тоже не работает:"
+                Receive-Job -Id $websockifyJob.Id | ForEach-Object { Write-Host "Alt Output: $_" }
             }
         }
         
@@ -374,8 +399,21 @@ jobs:
                     # Проверяем websockify
                     $websocketPort = Get-NetTCPConnection -LocalPort 6080 -ErrorAction SilentlyContinue
                     if (-not $websocketPort) {
-                        Write-Host "⚠️ Websockify остановлен, перезапускаем..."
-                        # Здесь можно добавить перезапуск websockify если нужно
+                        Write-Host "⚠️ Websockify остановлен на порту 6080, перезапускаем..."
+                        
+                        # Останавливаем старый job
+                        Remove-Job -Id $websockifyJob -Force -ErrorAction SilentlyContinue
+                        
+                        # Перезапускаем websockify
+                        $websockifyJob = Start-Job -ScriptBlock {
+                            param($novncPath)
+                            python -m websockify --web="$novncPath" --verbose 6080 localhost:5900
+                        } -ArgumentList "$env:USERPROFILE\novnc"
+                        
+                        Start-Sleep -Seconds 15
+                        Write-Host "🔄 Websockify перезапущен"
+                    } else {
+                        Write-Host "✅ Websockify работает на порту 6080"
                     }
                     
                     $lastCheck = Get-Date
