@@ -32,16 +32,28 @@ jobs:
         Invoke-WebRequest -Uri "https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-windows-amd64.exe" -OutFile "$env:USERPROFILE\cloudflared.exe"
         Write-Host "✅ cloudflared установлен."
 
-    - name: Start VNC + websockify + Cloudflare Tunnel
+    - name: Start VNC + noVNC + Cloudflare Tunnel
       run: |
         Write-Host "🚀 Запускаем VNC сервер..."
         & "C:\Program Files\TightVNC\tvnserver.exe" -controlapp -password 123456
         & "C:\Program Files\TightVNC\tvnserver.exe" -run
 
-        Write-Host "🚀 Запускаем websockify..."
-        Start-Process -NoNewWindow "python" -ArgumentList "-m", "websockify", "6080", "localhost:5900"
+        Write-Host "🚀 Запускаем websockify + noVNC..."
+        $noVncPath = "$env:USERPROFILE\novnc\noVNC-master"
+        Start-Process -NoNewWindow "python" -ArgumentList "-m", "websockify", "--web", $noVncPath, "6080", "localhost:5900"
 
         Start-Sleep -Seconds 5
 
         Write-Host "🚀 Запускаем Cloudflare Tunnel..."
-        & "$env:USERPROFILE\cloudflared.exe" tunnel --url http://localhost:6080
+        & "$env:USERPROFILE\cloudflared.exe" tunnel --url http://localhost:6080 | Tee-Object -FilePath cloudflared.log
+
+    - name: Show Access URL
+      run: |
+        $log = Get-Content cloudflared.log | Select-String "https://.*trycloudflare.com" | Select-Object -First 1
+        if ($log) {
+          $url = $log.Matches[0].Value
+          Write-Host "🌍 Перейди по ссылке для доступа к Windows:"
+          Write-Host "$url/vnc.html?autoconnect=true&password=123456"
+        } else {
+          Write-Host "⚠️ Не удалось найти ссылку Cloudflare в логах!"
+        }
