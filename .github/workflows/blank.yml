@@ -32,15 +32,30 @@ jobs:
         Invoke-WebRequest -Uri "https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-windows-amd64.exe" -OutFile "$env:USERPROFILE\cloudflared.exe"
         Write-Host "✅ cloudflared установлен."
 
+    - name: Configure VNC Registry Settings
+      run: |
+        Write-Host "� Насттраиваем реестр для TightVNC..."
+        # Создаем ключи реестра для TightVNC
+        New-Item -Path "HKLM:\SOFTWARE\TightVNC" -Force
+        New-Item -Path "HKLM:\SOFTWARE\TightVNC\Server" -Force
+        
+        # Настраиваем параметры VNC сервера
+        Set-ItemProperty -Path "HKLM:\SOFTWARE\TightVNC\Server" -Name "RfbPort" -Value 5900 -Type DWord
+        Set-ItemProperty -Path "HKLM:\SOFTWARE\TightVNC\Server" -Name "AcceptRfbConnections" -Value 1 -Type DWord
+        Set-ItemProperty -Path "HKLM:\SOFTWARE\TightVNC\Server" -Name "LoopbackOnly" -Value 0 -Type DWord
+        Set-ItemProperty -Path "HKLM:\SOFTWARE\TightVNC\Server" -Name "AcceptHttpConnections" -Value 1 -Type DWord
+        Set-ItemProperty -Path "HKLM:\SOFTWARE\TightVNC\Server" -Name "HttpPort" -Value 5800 -Type DWord
+        Set-ItemProperty -Path "HKLM:\SOFTWARE\TightVNC\Server" -Name "UseAuthentication" -Value 1 -Type DWord
+        
+        # Устанавливаем пароль (хеш для "123456")
+        $password = [System.Text.Encoding]::ASCII.GetBytes("123456")
+        $hash = [System.Security.Cryptography.MD5]::Create().ComputeHash($password)
+        Set-ItemProperty -Path "HKLM:\SOFTWARE\TightVNC\Server" -Name "Password" -Value $hash -Type Binary
+        
+        Write-Host "✅ Реестр настроен."
+
     - name: Start VNC + noVNC + Cloudflare Tunnel
       run: |
-        Write-Host "🚀 Настраиваем VNC сервер..."
-        & "C:\Program Files\TightVNC\tvnserver.exe" -controlapp -password 123456
-        & "C:\Program Files\TightVNC\tvnserver.exe" -controlapp -AcceptRfbConnections=1
-        & "C:\Program Files\TightVNC\tvnserver.exe" -controlapp -LoopbackOnly=0
-        & "C:\Program Files\TightVNC\tvnserver.exe" -controlapp -AcceptHttpConnections=1
-        & "C:\Program Files\TightVNC\tvnserver.exe" -controlapp -RfbPort=5900
-        
         Write-Host "🚀 Запускаем VNC сервер..."
         & "C:\Program Files\TightVNC\tvnserver.exe" -run
 
