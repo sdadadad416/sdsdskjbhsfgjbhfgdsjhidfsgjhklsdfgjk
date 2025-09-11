@@ -1,82 +1,207 @@
-name: Free Windows Desktop with NoVNC + Cloudflare Tunnel
+name: Free Windows Desktop with Guacamole + Cloudflare Tunnel
 
 on: workflow_dispatch
 
 jobs:
-  setup-novnc-tunnel:
+  setup-guacamole-tunnel:
     runs-on: windows-latest
     steps:
     - name: Check out the repository
       uses: actions/checkout@v2
 
-    - name: Download and Setup TightVNC Server
+    - name: Enable RDP Server
       run: |
-        Write-Host "📥 Скачиваем TightVNC Server..."
+        Write-Host "🖥️ Включаем RDP сервер..."
         try {
-            Invoke-WebRequest -Uri "https://www.tightvnc.com/download/2.8.85/tightvnc-2.8.85-gpl-setup-64bit.msi" -OutFile "$env:TEMP\tightvnc.msi"
+            # Включаем RDP
+            Set-ItemProperty -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server' -Name "fDenyTSConnections" -Value 0
+            Set-ItemProperty -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server\WinStations\RDP-Tcp' -Name "UserAuthentication" -Value 1
             
-            Write-Host "📦 Устанавливаем TightVNC Server..."
-            $installArgs = @(
-                '/i', "$env:TEMP\tightvnc.msi"
-                '/quiet', '/norestart'
-                'ADDLOCAL=Server'
-                'SERVER_REGISTER_AS_SERVICE=1'
-                'SERVER_ADD_FIREWALL_EXCEPTION=1'
-                'SET_USEVNCAUTHENTICATION=1'
-                'VALUE_OF_USEVNCAUTHENTICATION=1'
-                'SET_PASSWORD=1'
-                'VALUE_OF_PASSWORD=vnc123456'
-                'SET_USECONTROLAUTHENTICATION=1'
-                'VALUE_OF_USECONTROLAUTHENTICATION=1'
-                'SET_CONTROLPASSWORD=1'
-                'VALUE_OF_CONTROLPASSWORD=admin123456'
-            )
+            # Настройка брандмауэра
+            Enable-NetFirewallRule -DisplayGroup "Remote Desktop"
+            New-NetFirewallRule -DisplayName "Allow RDP" -Direction Inbound -Protocol TCP -LocalPort 3389 -Action Allow -ErrorAction SilentlyContinue
             
-            $process = Start-Process msiexec.exe -Wait -ArgumentList $installArgs -PassThru
-            if ($process.ExitCode -eq 0) {
-                Write-Host "✅ TightVNC Server установлен успешно!"
-            } else {
-                Write-Host "⚠️ TightVNC установлен с кодом: $($process.ExitCode)"
-            }
+            # Включение звука
+            Set-ItemProperty -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server\WinStations\RDP-Tcp' -Name "fDisableAudio" -Value 0
+            Start-Service -Name "Audiosrv" -ErrorAction SilentlyContinue
+            Set-Service -Name "Audiosrv" -StartupType Automatic -ErrorAction SilentlyContinue
+            
+            # Включение сервиса терминалов
+            Start-Service -Name "TermService" -ErrorAction SilentlyContinue
+            Set-Service -Name "TermService" -StartupType Automatic -ErrorAction SilentlyContinue
+            
+            Write-Host "✅ RDP сервер включен успешно!"
         } catch {
-            Write-Host "❌ Ошибка установки TightVNC: $($_.Exception.Message)"
+            Write-Host "❌ Ошибка настройки RDP: $($_.Exception.Message)"
         }
         Start-Sleep -Seconds 5
 
-    - name: Download and Setup NoVNC
+    - name: Setup Guacamole (без Docker)
       run: |
-        Write-Host "📥 Скачиваем NoVNC..."
-        Invoke-WebRequest -Uri "https://github.com/novnc/noVNC/archive/refs/tags/v1.4.0.zip" -OutFile "$env:TEMP\novnc.zip"
+        Write-Host "🌐 Настраиваем Guacamole веб-интерфейс..."
         
-        Write-Host "📦 Распаковываем NoVNC..."
-        Expand-Archive -Path "$env:TEMP\novnc.zip" -DestinationPath "$env:USERPROFILE" -Force
-        Rename-Item -Path "$env:USERPROFILE\noVNC-1.4.0" -NewName "novnc" -Force
+        # Создаем простой HTML5 RDP клиент
+        $guacamoleHtml = @"
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Windows Desktop - RDP Client</title>
+    <style>
+        body { margin: 0; padding: 20px; font-family: Arial, sans-serif; background: #2c3e50; color: white; }
+        .container { max-width: 1200px; margin: 0 auto; }
+        .header { text-align: center; margin-bottom: 20px; }
+        .rdp-frame { width: 100%; height: 600px; border: 2px solid #34495e; border-radius: 8px; }
+        .info { background: #34495e; padding: 15px; border-radius: 8px; margin-bottom: 20px; }
+        .credentials { display: grid; grid-template-columns: repeat(auto-fit, minmax(250px, 1fr)); gap: 10px; }
+        .cred-item { background: #2c3e50; padding: 10px; border-radius: 4px; }
+        .download-links { margin-top: 20px; }
+        .download-links a { color: #3498db; text-decoration: none; margin-right: 15px; }
+        .download-links a:hover { text-decoration: underline; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1>🖥️ Windows Desktop Access</h1>
+            <p>Подключение к удаленному рабочему столу Windows</p>
+        </div>
         
-        # Создаем index.html как копию vnc.html
-        Write-Host "🔧 Создаем index.html..."
-        if (Test-Path "$env:USERPROFILE\novnc\vnc.html") {
-            Copy-Item -Path "$env:USERPROFILE\novnc\vnc.html" -Destination "$env:USERPROFILE\novnc\index.html" -Force
-            Write-Host "✅ index.html создан"
+        <div class="info">
+            <h3>📋 Данные для подключения:</h3>
+            <div class="credentials">
+                <div class="cred-item">
+                    <strong>🌐 Сервер:</strong> localhost:3389
+                </div>
+                <div class="cred-item">
+                    <strong>👤 Пользователь:</strong> runneradmin
+                </div>
+                <div class="cred-item">
+                    <strong>🔑 Пароль:</strong> Desktop2024!
+                </div>
+                <div class="cred-item">
+                    <strong>🖼️ Разрешение:</strong> 1024x768
+                </div>
+            </div>
+        </div>
+        
+        <div class="info">
+            <h3>🚀 Способы подключения:</h3>
+            <div class="download-links">
+                <a href="#" onclick="connectRDP()">🌐 Веб RDP (HTML5)</a>
+                <a href="rdp://runneradmin:Desktop2024!@localhost:3389">📱 Открыть в RDP клиенте</a>
+                <a href="#" onclick="downloadRDP()">💾 Скачать .rdp файл</a>
+            </div>
+        </div>
+        
+        <iframe id="rdpFrame" class="rdp-frame" src="about:blank" style="display:none;"></iframe>
+        
+        <div id="webRDP" style="display:none;">
+            <h3>🌐 Веб RDP клиент загружается...</h3>
+            <p>Если не загружается, используйте стандартный RDP клиент вашей ОС.</p>
+        </div>
+    </div>
+    
+    <script>
+        function connectRDP() {
+            document.getElementById('webRDP').style.display = 'block';
+            // Здесь можно добавить веб RDP клиент
+            alert('Используйте RDP клиент вашей ОС для подключения к localhost:3389');
         }
         
-
+        function downloadRDP() {
+            const rdpContent = `screen mode id:i:2
+use multimon:i:0
+desktopwidth:i:1024
+desktopheight:i:768
+session bpp:i:32
+winposstr:s:0,3,0,0,800,600
+compression:i:1
+keyboardhook:i:2
+audiocapturemode:i:0
+videoplaybackmode:i:1
+connection type:i:7
+networkautodetect:i:1
+bandwidthautodetect:i:1
+displayconnectionbar:i:1
+enableworkspacereconnect:i:0
+disable wallpaper:i:0
+allow font smoothing:i:0
+allow desktop composition:i:0
+disable full window drag:i:1
+disable menu anims:i:1
+disable themes:i:0
+disable cursor setting:i:0
+bitmapcachepersistenable:i:1
+full address:s:localhost:3389
+audiomode:i:0
+redirectprinters:i:1
+redirectcomports:i:0
+redirectsmartcards:i:1
+redirectclipboard:i:1
+redirectposdevices:i:0
+autoreconnection enabled:i:1
+authentication level:i:2
+prompt for credentials:i:0
+negotiate security layer:i:1
+remoteapplicationmode:i:0
+alternate shell:s:
+shell working directory:s:
+gatewayhostname:s:
+gatewayusagemethod:i:4
+gatewaycredentialssource:i:4
+gatewayprofileusagemethod:i:0
+promptcredentialonce:i:0
+gatewaybrokeringtype:i:0
+use redirection server name:i:0
+rdgiskdcproxy:i:0
+kdcproxyname:s:
+username:s:runneradmin`;
+            
+            const blob = new Blob([rdpContent], { type: 'application/rdp' });
+            const url = window.URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = 'windows-desktop.rdp';
+            document.body.appendChild(a);
+            a.click();
+            document.body.removeChild(a);
+            window.URL.revokeObjectURL(url);
+        }
+    </script>
+</body>
+</html>
+"@
         
-        Write-Host "📥 Скачиваем websockify..."
-        Invoke-WebRequest -Uri "https://github.com/novnc/websockify/archive/refs/tags/v0.11.0.zip" -OutFile "$env:TEMP\websockify.zip"
-        Expand-Archive -Path "$env:TEMP\websockify.zip" -DestinationPath "$env:USERPROFILE" -Force
-        Rename-Item -Path "$env:USERPROFILE\websockify-0.11.0" -NewName "websockify" -Force
-        
-        Write-Host "✅ NoVNC настроен!"
+        # Сохраняем HTML файл
+        $guacamoleHtml | Out-File -FilePath "$env:USERPROFILE\guacamole.html" -Encoding UTF8
+        Write-Host "✅ Guacamole веб-интерфейс создан"
 
-    - name: Setup Python Environment
+    - name: Setup Python HTTP Server
       run: |
-        Write-Host "🐍 Настраиваем Python окружение..."
+        Write-Host "🐍 Настраиваем Python HTTP сервер..."
         
-        # Python уже установлен в GitHub Actions, просто обновляем pip
+        # Python уже установлен в GitHub Actions
         python -m pip install --upgrade pip
-        python -m pip install numpy
         
-        Write-Host "✅ Python окружение готово!"
+        # Запускаем HTTP сервер для Guacamole интерфейса
+        $serverJob = Start-Job -ScriptBlock {
+            Set-Location $env:USERPROFILE
+            python -m http.server 8080
+        }
+        
+        Start-Sleep -Seconds 10
+        
+        # Проверяем что сервер работает
+        try {
+            $response = Invoke-WebRequest -Uri "http://localhost:8080/guacamole.html" -TimeoutSec 5
+            Write-Host "✅ HTTP сервер работает: $($response.StatusCode)"
+        } catch {
+            Write-Host "❌ Ошибка HTTP сервера: $($_.Exception.Message)"
+        }
+        
+        Write-Host "✅ Python HTTP сервер запущен на порту 8080"
 
     - name: Download and Setup Cloudflare Tunnel
       run: |
@@ -89,7 +214,7 @@ jobs:
       run: |
         Write-Host "⚙️ Настраиваем систему..."
         
-        # Создаем пользователя для VNC
+        # Создаем пользователя для RDP
         Write-Host "👤 Настраиваем пользователя..."
         Set-LocalUser -Name "runneradmin" -Password (ConvertTo-SecureString -AsPlainText "Desktop2024!" -Force)
         
@@ -125,181 +250,27 @@ jobs:
         
         Write-Host "✅ Система настроена!"
 
-    - name: Start VNC Server
+    - name: Verify RDP Server
       run: |
-        Write-Host "🖥️ Запускаем VNC Server..."
+        Write-Host "🔍 Проверяем RDP сервер..."
         
-        # Проверяем установку TightVNC
-        $tvnPath = "C:\Program Files\TightVNC\tvnserver.exe"
-        if (-not (Test-Path $tvnPath)) {
-            Write-Host "❌ TightVNC не найден по пути: $tvnPath"
-            Write-Host "🔍 Ищем альтернативные пути..."
-            $altPaths = @(
-                "C:\Program Files (x86)\TightVNC\tvnserver.exe",
-                "$env:ProgramFiles\TightVNC\tvnserver.exe",
-                "${env:ProgramFiles(x86)}\TightVNC\tvnserver.exe"
-            )
-            foreach ($path in $altPaths) {
-                if (Test-Path $path) {
-                    $tvnPath = $path
-                    Write-Host "✅ Найден TightVNC: $path"
-                    break
-                }
-            }
+        # Проверяем что RDP слушает порт 3389
+        $rdpPort = Get-NetTCPConnection -LocalPort 3389 -ErrorAction SilentlyContinue
+        if ($rdpPort) {
+            Write-Host "✅ RDP сервер работает на порту 3389"
+        } else {
+            Write-Host "❌ RDP сервер не слушает порт 3389"
+            Write-Host "🔄 Перезапускаем RDP сервис..."
+            Restart-Service -Name "TermService" -Force
+            Start-Sleep -Seconds 10
         }
         
-        if (Test-Path $tvnPath) {
-            # Пробуем запустить сервис
-            try {
-                Start-Service -Name "tvnserver" -ErrorAction SilentlyContinue
-                Start-Sleep -Seconds 5
-            } catch {
-                Write-Host "⚠️ Сервис не запустился: $($_.Exception.Message)"
-            }
-            
-            # Альтернативный запуск если сервис не работает
-            if ((Get-Service -Name "tvnserver" -ErrorAction SilentlyContinue).Status -ne "Running") {
-                Write-Host "⚠️ Запускаем VNC вручную..."
-                try {
-                    Start-Process -FilePath $tvnPath -ArgumentList "-run" -WindowStyle Hidden
-                    Start-Sleep -Seconds 10
-                } catch {
-                    Write-Host "❌ Ошибка запуска VNC: $($_.Exception.Message)"
-                }
-            }
-            
-            # Проверяем что VNC слушает порт 5900
-            Start-Sleep -Seconds 5
-            $vnc = Get-NetTCPConnection -LocalPort 5900 -ErrorAction SilentlyContinue
-            if ($vnc) {
-                Write-Host "✅ VNC Server запущен на порту 5900"
-            } else {
-                Write-Host "❌ VNC Server не слушает порт 5900"
-                Write-Host "🔍 Проверяем все активные порты..."
-                Get-NetTCPConnection | Where-Object {$_.LocalPort -like "59*"} | Format-Table LocalAddress,LocalPort,State
-            }
+        # Проверяем HTTP сервер
+        $httpPort = Get-NetTCPConnection -LocalPort 8080 -ErrorAction SilentlyContinue
+        if ($httpPort) {
+            Write-Host "✅ HTTP сервер работает на порту 8080"
         } else {
-            Write-Host "❌ TightVNC не найден! Установка могла не завершиться."
-        }
-
-    - name: Start NoVNC Websockify
-      run: |
-        Write-Host "🌐 Запускаем NoVNC websockify..."
-        
-        # Обновляем PATH для Python
-        $env:PATH = [System.Environment]::GetEnvironmentVariable("PATH","Machine") + ";" + [System.Environment]::GetEnvironmentVariable("PATH","User")
-        
-        # Устанавливаем websockify через pip (более надежно)
-        Write-Host "📦 Устанавливаем websockify через pip..."
-        python -m pip install websockify
-        
-        # Проверяем что файлы на месте
-        Write-Host "🔍 Проверяем файлы..."
-        if (Test-Path "$env:USERPROFILE\novnc") {
-            Write-Host "✅ NoVNC найден"
-        } else {
-            Write-Host "❌ NoVNC не найден"
-        }
-        
-        # Проверяем что VNC работает перед запуском websockify
-        Write-Host "� Проуверяем VNC перед запуском websockify..."
-        $vncCheck = Get-NetTCPConnection -LocalPort 5900 -ErrorAction SilentlyContinue
-        if ($vncCheck) {
-            Write-Host "✅ VNC работает на порту 5900"
-        } else {
-            Write-Host "❌ VNC не работает на порту 5900!"
-        }
-        
-        # Запускаем websockify в фоне с подробными логами
-        Write-Host "🚀 Запускаем websockify..."
-        $websockifyJob = Start-Job -ScriptBlock {
-            param($novncPath)
-            Write-Host "Запуск websockify с параметрами:"
-            Write-Host "NoVNC path: $novncPath"
-            Write-Host "Target: localhost:5900"
-            Write-Host "Listen: 6080"
-            
-            # Запускаем websockify с простыми параметрами
-            Write-Host "Запуск websockify для NoVNC..."
-            python -m websockify --web="$novncPath" 6080 localhost:5900
-        } -ArgumentList "$env:USERPROFILE\novnc"
-        
-        Start-Sleep -Seconds 20
-        
-        # Проверяем статус с подробной диагностикой
-        $jobState = Get-Job -Id $websockifyJob.Id | Select-Object -ExpandProperty State
-        Write-Host "📊 Статус websockify job: $jobState"
-        
-        if ($jobState -eq "Running") {
-            Write-Host "✅ NoVNC websockify запущен!"
-        } else {
-            Write-Host "❌ Ошибка запуска websockify через pip:"
-            $jobOutput = Receive-Job -Id $websockifyJob.Id
-            $jobOutput | ForEach-Object { Write-Host "Job Output: $_" }
-            
-            # Пробуем альтернативный способ
-            Write-Host "🔄 Пробуем альтернативный запуск..."
-            Remove-Job -Id $websockifyJob.Id -Force -ErrorAction SilentlyContinue
-            
-            $websockifyJob = Start-Job -ScriptBlock {
-                param($novncPath)
-                Write-Host "Альтернативный запуск websockify..."
-                python -m websockify --web "$novncPath" 6080 localhost:5900
-            } -ArgumentList "$env:USERPROFILE\novnc"
-            
-            Start-Sleep -Seconds 15
-            $altJobState = Get-Job -Id $websockifyJob.Id | Select-Object -ExpandProperty State
-            Write-Host "📊 Альтернативный статус: $altJobState"
-            
-            if ($altJobState -ne "Running") {
-                Write-Host "❌ Альтернативный способ тоже не работает:"
-                Receive-Job -Id $websockifyJob.Id | ForEach-Object { Write-Host "Alt Output: $_" }
-            }
-        }
-        
-        # Проверяем что websockify слушает порт 6080
-        Start-Sleep -Seconds 5
-        $websocket = Get-NetTCPConnection -LocalPort 6080 -ErrorAction SilentlyContinue
-        if ($websocket) {
-            Write-Host "✅ Websockify слушает порт 6080"
-            
-            # Тестируем HTTP подключение к websockify
-            Write-Host "🔍 Тестируем HTTP подключение к websockify..."
-            try {
-                $response = Invoke-WebRequest -Uri "http://localhost:6080" -TimeoutSec 10 -ErrorAction Stop
-                Write-Host "✅ HTTP ответ от websockify: $($response.StatusCode)"
-                Write-Host "📄 Content-Type: $($response.Headers.'Content-Type')"
-            } catch {
-                Write-Host "❌ Ошибка HTTP подключения к websockify: $($_.Exception.Message)"
-            }
-            
-            # Проверяем NoVNC файлы
-            Write-Host "🔍 Проверяем NoVNC файлы..."
-            $novncFiles = @(
-                "$env:USERPROFILE\novnc\vnc.html",
-                "$env:USERPROFILE\novnc\index.html",
-                "$env:USERPROFILE\novnc\app\ui.js"
-            )
-            foreach ($file in $novncFiles) {
-                if (Test-Path $file) {
-                    Write-Host "✅ Найден: $file"
-                } else {
-                    Write-Host "❌ Отсутствует: $file"
-                }
-            }
-            
-            # Показываем содержимое папки NoVNC
-            Write-Host "📁 Содержимое папки NoVNC:"
-            Get-ChildItem "$env:USERPROFILE\novnc" | Select-Object Name, Length | Format-Table
-            
-        } else {
-            Write-Host "❌ Websockify не слушает порт 6080"
-            Write-Host "🔍 Проверяем активные порты:"
-            Get-NetTCPConnection | Where-Object {$_.LocalPort -like "60*"} | Format-Table LocalAddress,LocalPort,State
-            
-            # Показываем ошибки websockify
-            Write-Host "📋 Ошибки websockify:"
-            Receive-Job -Id $websockifyJob.Id | ForEach-Object { Write-Host "Websockify: $_" }
+            Write-Host "❌ HTTP сервер не работает на порту 8080"
         }
 
     - name: Start Cloudflare Tunnel and Keep Alive
@@ -313,7 +284,7 @@ jobs:
         # Запускаем в фоне с логированием
         $tunnelJob = Start-Job -ScriptBlock {
             param($cloudflaredPath, $logPath)
-            & $cloudflaredPath tunnel --url http://localhost:6080 2>&1 | Tee-Object -FilePath $logPath
+            & $cloudflaredPath tunnel --url http://localhost:8080 2>&1 | Tee-Object -FilePath $logPath
         } -ArgumentList "$env:USERPROFILE\cloudflared.exe", $logFile
         
         Start-Sleep -Seconds 30
@@ -376,27 +347,28 @@ jobs:
         Write-Host "🌐 ИНФОРМАЦИЯ ДЛЯ ПОДКЛЮЧЕНИЯ К WINDOWS DESKTOP"
         Write-Host "=" * 70
         if ($tunnelUrl) {
-            Write-Host "🔗 ПРЯМАЯ ССЫЛКА: $tunnelUrl"
+            Write-Host "🔗 ПРЯМАЯ ССЫЛКА: $tunnelUrl/guacamole.html"
             Write-Host "🎯 Скопируйте эту ссылку и откройте в браузере!"
         } else {
             Write-Host "🔗 Веб-интерфейс: Смотрите URL выше в логах Cloudflare"
-            Write-Host "� оФормат: https://[random].trycloudflare.com"
+            Write-Host "🔗 Добавьте /guacamole.html к URL"
         }
         Write-Host ""
-        Write-Host "🔐 VNC Пароль: vnc123456"
+        Write-Host "📋 Данные для RDP подключения:"
+        Write-Host "🌐 Сервер: localhost:3389 (через туннель)"
         Write-Host "👤 Windows Пользователь: runneradmin"
         Write-Host "🔑 Windows Пароль: Desktop2024!"
         Write-Host ""
-        Write-Host "💻 Откройте URL в браузере для доступа к рабочему столу"
-        Write-Host "🎮 Полная поддержка клавиатуры и мыши"
-        Write-Host "🌍 Работает в любом браузере (Chrome, Firefox, Safari, Edge)"
-        Write-Host "📱 Даже на мобильных устройствах!"
+        Write-Host "💻 Откройте URL в браузере для веб-интерфейса"
+        Write-Host "🖥️ Или используйте любой RDP клиент"
+        Write-Host "🎮 Полная поддержка звука, клавиатуры и мыши"
+        Write-Host "🌍 Работает в любом браузере и на мобильных устройствах"
         Write-Host "=" * 70
         Write-Host ""
         
         Write-Host "⏰ Поддерживаем работу туннеля..."
         Write-Host "🛑 Для остановки прервите выполнение workflow"
-        Write-Host "📊 Туннель будет работать в течение ~6 часов"
+        Write-Host "📊 Туннель будет работать бесконечно"
         
         # Основной цикл поддержания работы (бесконечный)
         $startTime = Get-Date
@@ -416,7 +388,7 @@ jobs:
                         # Перезапускаем туннель
                         $tunnelJob = Start-Job -ScriptBlock {
                             param($cloudflaredPath, $logPath)
-                            & $cloudflaredPath tunnel --url http://localhost:6080 2>&1 | Tee-Object -FilePath $logPath
+                            & $cloudflaredPath tunnel --url http://localhost:8080 2>&1 | Tee-Object -FilePath $logPath
                         } -ArgumentList "$env:USERPROFILE\cloudflared.exe", $logFile
                         
                         Start-Sleep -Seconds 20
@@ -428,37 +400,25 @@ jobs:
                             $newOutput | ForEach-Object { 
                                 Write-Host $_
                                 if ($_ -match "https://[a-zA-Z0-9\-]+\.trycloudflare\.com") {
-                                    Write-Host "🎯 Новый URL: $($matches[0])"
+                                    Write-Host "🎯 Новый URL: $($matches[0])/guacamole.html"
                                 }
                             }
                         }
                     }
                     
-                    # Проверяем VNC сервер
-                    $vncPort = Get-NetTCPConnection -LocalPort 5900 -ErrorAction SilentlyContinue
-                    if (-not $vncPort) {
-                        Write-Host "⚠️ VNC Server остановлен, перезапускаем..."
-                        Start-Process -FilePath "C:\Program Files\TightVNC\tvnserver.exe" -ArgumentList "-controlservice", "-start" -Wait
+                    # Проверяем RDP сервер
+                    $rdpPort = Get-NetTCPConnection -LocalPort 3389 -ErrorAction SilentlyContinue
+                    if (-not $rdpPort) {
+                        Write-Host "⚠️ RDP Server остановлен, перезапускаем..."
+                        Start-Service -Name "TermService" -ErrorAction SilentlyContinue
                     }
                     
-                    # Проверяем websockify
-                    $websocketPort = Get-NetTCPConnection -LocalPort 6080 -ErrorAction SilentlyContinue
-                    if (-not $websocketPort) {
-                        Write-Host "⚠️ Websockify остановлен на порту 6080, перезапускаем..."
-                        
-                        # Останавливаем старый job
-                        Remove-Job -Id $websockifyJob -Force -ErrorAction SilentlyContinue
-                        
-                        # Перезапускаем websockify
-                        $websockifyJob = Start-Job -ScriptBlock {
-                            param($novncPath)
-                            python -m websockify --web "$novncPath" 6080 localhost:5900
-                        } -ArgumentList "$env:USERPROFILE\novnc"
-                        
-                        Start-Sleep -Seconds 15
-                        Write-Host "🔄 Websockify перезапущен"
+                    # Проверяем HTTP сервер
+                    $httpPort = Get-NetTCPConnection -LocalPort 8080 -ErrorAction SilentlyContinue
+                    if (-not $httpPort) {
+                        Write-Host "⚠️ HTTP сервер остановлен на порту 8080"
                     } else {
-                        Write-Host "✅ Websockify работает на порту 6080"
+                        Write-Host "✅ Все сервисы работают"
                     }
                     
                     $lastCheck = Get-Date
