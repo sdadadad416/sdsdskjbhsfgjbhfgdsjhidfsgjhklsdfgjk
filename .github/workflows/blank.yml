@@ -32,14 +32,14 @@ jobs:
         Invoke-WebRequest -Uri "https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-windows-amd64.exe" -OutFile "$env:USERPROFILE\cloudflared.exe"
         Write-Host "✅ cloudflared установлен."
 
-    - name: Start VNC + noVNC + Cloudflare Tunnel
+    - name: Start VNC + websockify + Cloudflare Tunnel
       run: |
         Write-Host "🚀 Запускаем VNC сервер..."
         & "C:\Program Files\TightVNC\tvnserver.exe" -controlapp -password 123456
         & "C:\Program Files\TightVNC\tvnserver.exe" -run
 
-        Write-Host "🚀 Запускаем noVNC..."
-        Start-Process -NoNewWindow "python" -ArgumentList "$env:USERPROFILE\novnc\noVNC-master\utils\novnc_proxy", "--vnc", "localhost:5900", "--listen", "6080"
+        Write-Host "🚀 Запускаем websockify..."
+        Start-Process -NoNewWindow "python" -ArgumentList "-m", "websockify", "6080", "localhost:5900"
 
         Start-Sleep -Seconds 5
 
