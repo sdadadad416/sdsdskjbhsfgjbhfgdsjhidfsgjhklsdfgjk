@@ -59,11 +59,7 @@ jobs:
             Write-Host "✅ index.html создан"
         }
         
-        # Создаем конфигурационный файл для websockify
-        Write-Host "🔧 Создаем конфиг для websockify..."
-        $tokenConfig = "default: localhost:5900"
-        $tokenConfig | Out-File -FilePath "$env:USERPROFILE\novnc\vnc_tokens.txt" -Encoding ASCII
-        Write-Host "✅ Конфиг создан"
+
         
         Write-Host "📥 Скачиваем websockify..."
         Invoke-WebRequest -Uri "https://github.com/novnc/websockify/archive/refs/tags/v0.11.0.zip" -OutFile "$env:TEMP\websockify.zip"
@@ -223,9 +219,9 @@ jobs:
             Write-Host "Target: localhost:5900"
             Write-Host "Listen: 6080"
             
-            # Запускаем websockify с правильными параметрами для NoVNC
+            # Запускаем websockify с простыми параметрами
             Write-Host "Запуск websockify для NoVNC..."
-            python -m websockify --web="$novncPath" --verbose --target-config="$novncPath\vnc_tokens.txt" 6080 localhost:5900
+            python -m websockify --web="$novncPath" 6080 localhost:5900
         } -ArgumentList "$env:USERPROFILE\novnc"
         
         Start-Sleep -Seconds 20
@@ -247,8 +243,8 @@ jobs:
             
             $websockifyJob = Start-Job -ScriptBlock {
                 param($novncPath)
-                Set-Location "$novncPath\utils"
-                python websockify.py --web=.. --verbose 6080 localhost:5900
+                Write-Host "Альтернативный запуск websockify..."
+                python -m websockify --web "$novncPath" 6080 localhost:5900
             } -ArgumentList "$env:USERPROFILE\novnc"
             
             Start-Sleep -Seconds 15
@@ -456,7 +452,7 @@ jobs:
                         # Перезапускаем websockify
                         $websockifyJob = Start-Job -ScriptBlock {
                             param($novncPath)
-                            python -m websockify --web="$novncPath" --verbose 6080 localhost:5900
+                            python -m websockify --web "$novncPath" 6080 localhost:5900
                         } -ArgumentList "$env:USERPROFILE\novnc"
                         
                         Start-Sleep -Seconds 15
