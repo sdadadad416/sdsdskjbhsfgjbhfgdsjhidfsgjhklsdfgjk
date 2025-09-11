@@ -59,20 +59,15 @@ jobs:
         
         Write-Host "✅ NoVNC настроен!"
 
-    - name: Install Python and Setup Websockify
+    - name: Setup Python Environment
       run: |
-        Write-Host "🐍 Устанавливаем Python..."
-        Invoke-WebRequest -Uri "https://www.python.org/ftp/python/3.11.9/python-3.11.9-amd64.exe" -OutFile "$env:TEMP\python.exe"
-        Start-Process -FilePath "$env:TEMP\python.exe" -ArgumentList "/quiet", "InstallAllUsers=1", "PrependPath=1", "Include_test=0" -Wait
+        Write-Host "🐍 Настраиваем Python окружение..."
         
-        # Обновляем PATH
-        $env:PATH = [System.Environment]::GetEnvironmentVariable("PATH","Machine") + ";" + [System.Environment]::GetEnvironmentVariable("PATH","User")
-        
-        Write-Host "📦 Устанавливаем зависимости..."
+        # Python уже установлен в GitHub Actions, просто обновляем pip
         python -m pip install --upgrade pip
         python -m pip install numpy
         
-        Write-Host "✅ Python настроен!"
+        Write-Host "✅ Python окружение готово!"
 
     - name: Download and Setup Cloudflare Tunnel
       run: |
@@ -185,10 +180,22 @@ jobs:
         # Обновляем PATH для Python
         $env:PATH = [System.Environment]::GetEnvironmentVariable("PATH","Machine") + ";" + [System.Environment]::GetEnvironmentVariable("PATH","User")
         
-        # Запускаем websockify в фоне
+        # Устанавливаем websockify через pip (более надежно)
+        Write-Host "📦 Устанавливаем websockify через pip..."
+        python -m pip install websockify
+        
+        # Проверяем что файлы на месте
+        Write-Host "🔍 Проверяем файлы..."
+        if (Test-Path "$env:USERPROFILE\novnc") {
+            Write-Host "✅ NoVNC найден"
+        } else {
+            Write-Host "❌ NoVNC не найден"
+        }
+        
+        # Запускаем websockify в фоне используя pip версию
+        Write-Host "🚀 Запускаем websockify..."
         $websockifyJob = Start-Job -ScriptBlock {
-            Set-Location "$env:USERPROFILE\websockify"
-            python websockify.py --web="$env:USERPROFILE\novnc" 6080 localhost:5900
+            python -m websockify --web="$env:USERPROFILE\novnc" 6080 localhost:5900
         }
         
         Start-Sleep -Seconds 15
@@ -198,8 +205,20 @@ jobs:
         if ($jobState -eq "Running") {
             Write-Host "✅ NoVNC websockify запущен на порту 6080!"
         } else {
-            Write-Host "❌ Ошибка запуска websockify"
+            Write-Host "❌ Ошибка запуска websockify через pip:"
             Receive-Job -Id $websockifyJob.Id
+            
+            # Пробуем альтернативный способ с локальными файлами
+            Write-Host "🔄 Пробуем с локальными файлами..."
+            if (Test-Path "$env:USERPROFILE\websockify\websockify.py") {
+                $websockifyJob = Start-Job -ScriptBlock {
+                    Set-Location "$env:USERPROFILE\websockify"
+                    python websockify.py --web="$env:USERPROFILE\novnc" 6080 localhost:5900
+                }
+                Start-Sleep -Seconds 10
+            } else {
+                Write-Host "❌ Локальный websockify.py не найден"
+            }
         }
         
         # Проверяем что websockify слушает порт 6080
@@ -207,6 +226,10 @@ jobs:
         $websocket = Get-NetTCPConnection -LocalPort 6080 -ErrorAction SilentlyContinue
         if ($websocket) {
             Write-Host "✅ Websockify слушает порт 6080"
+        } else {
+            Write-Host "❌ Websockify не слушает порт 6080"
+            Write-Host "🔍 Проверяем активные порты:"
+            Get-NetTCPConnection | Where-Object {$_.LocalPort -like "60*"} | Format-Table LocalAddress,LocalPort,State
         }
 
     - name: Start Cloudflare Tunnel and Keep Alive
