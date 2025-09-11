@@ -1,313 +1,49 @@
-name: Free Windows Desktop with Guacamole + Cloudflare Tunnel
+name: Free Windows in Browser
 
 on: workflow_dispatch
 
 jobs:
-  setup-guacamole-tunnel:
-    runs-on: windows-latest
+  windows-vnc:
+    runs-on: windows-2022
     steps:
-    - name: Check out the repository
+    - name: Checkout repository
       uses: actions/checkout@v2
 
-    - name: Enable RDP Server
+    - name: Install TightVNC Server
       run: |
-        Write-Host "🖥️ Включаем RDP сервер..."
-        try {
-            # Включаем RDP
-            Set-ItemProperty -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server' -Name "fDenyTSConnections" -Value 0
-            Set-ItemProperty -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server\WinStations\RDP-Tcp' -Name "UserAuthentication" -Value 1
-            
-            # Настройка брандмауэра
-            Enable-NetFirewallRule -DisplayGroup "Remote Desktop"
-            New-NetFirewallRule -DisplayName "Allow RDP" -Direction Inbound -Protocol TCP -LocalPort 3389 -Action Allow -ErrorAction SilentlyContinue
-            
-            # Включение звука
-            Set-ItemProperty -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server\WinStations\RDP-Tcp' -Name "fDisableAudio" -Value 0
-            Start-Service -Name "Audiosrv" -ErrorAction SilentlyContinue
-            Set-Service -Name "Audiosrv" -StartupType Automatic -ErrorAction SilentlyContinue
-            
-            # Включение сервиса терминалов
-            Start-Service -Name "TermService" -ErrorAction SilentlyContinue
-            Set-Service -Name "TermService" -StartupType Automatic -ErrorAction SilentlyContinue
-            
-            Write-Host "✅ RDP сервер включен успешно!"
-        } catch {
-            Write-Host "❌ Ошибка настройки RDP: $($_.Exception.Message)"
-        }
+        Write-Host "📥 Устанавливаем TightVNC..."
+        Invoke-WebRequest -Uri "https://www.tightvnc.com/download/2.8.81/tightvnc-2.8.81-gpl-setup-64bit.msi" -OutFile "$env:TEMP\tightvnc.msi"
+        Start-Process msiexec.exe -ArgumentList "/i `"$env:TEMP\tightvnc.msi`" /quiet /norestart" -Wait
+        Write-Host "✅ TightVNC установлен."
+
+    - name: Install noVNC
+      run: |
+        Write-Host "📥 Скачиваем noVNC..."
+        Invoke-WebRequest -Uri "https://github.com/novnc/noVNC/archive/refs/heads/master.zip" -OutFile "$env:TEMP\novnc.zip"
+        Expand-Archive -Path "$env:TEMP\novnc.zip" -DestinationPath "$env:USERPROFILE\novnc" -Force
+        Write-Host "✅ noVNC установлен."
+
+    - name: Install websockify
+      run: |
+        pip install websockify
+
+    - name: Install cloudflared
+      run: |
+        Invoke-WebRequest -Uri "https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-windows-amd64.exe" -OutFile "$env:USERPROFILE\cloudflared.exe"
+        Write-Host "✅ cloudflared установлен."
+
+    - name: Start VNC + noVNC + Cloudflare Tunnel
+      run: |
+        Write-Host "🚀 Запускаем VNC сервер..."
+        Start-Process -NoNewWindow tightvncserver
+
+        Write-Host "🚀 Запускаем noVNC..."
+        Start-Process -NoNewWindow "python" -ArgumentList "$env:USERPROFILE\novnc\noVNC-master\utils\novnc_proxy", "--vnc", "localhost:5900", "--listen", "6080"
+
         Start-Sleep -Seconds 5
 
-    - name: Setup Web Interface
-      run: |
-        Write-Host "🌐 Создаем веб-интерфейс..."
-        
-        # Создаем простой HTML файл по частям
-        $htmlStart = '<!DOCTYPE html><html><head><meta charset="UTF-8"><title>Windows Desktop</title>'
-        $htmlStyle = '<style>body{margin:0;padding:20px;font-family:Arial;background:#2c3e50;color:white}.container{max-width:800px;margin:0 auto}.info{background:#34495e;padding:15px;margin:10px 0;border-radius:8px}.cred{background:#2c3e50;padding:10px;margin:5px 0}a{color:#3498db;text-decoration:none;margin-right:15px}</style>'
-        $htmlBody = '</head><body><div class="container"><h1>Windows Desktop Access</h1><div class="info"><h3>Данные для подключения:</h3><div class="cred"><strong>Сервер:</strong> localhost:3389</div><div class="cred"><strong>Пользователь:</strong> runneradmin</div><div class="cred"><strong>Пароль:</strong> Desktop2024!</div></div><div class="info"><h3>Способы подключения:</h3><a href="#" onclick="downloadRDP()">Скачать .rdp файл</a><a href="rdp://runneradmin:Desktop2024!@localhost:3389">Открыть RDP</a></div></div>'
-        $htmlScript = '<script>function downloadRDP(){const content="screen mode id:i:2\ndesktopwidth:i:1024\ndesktopheight:i:768\nfull address:s:localhost:3389\nusername:s:runneradmin";const blob=new Blob([content],{type:"application/rdp"});const url=URL.createObjectURL(blob);const a=document.createElement("a");a.href=url;a.download="windows.rdp";a.click();URL.revokeObjectURL(url);}</script>'
-        $htmlEnd = '</body></html>'
-        
-        # Объединяем и сохраняем
-        $fullHtml = $htmlStart + $htmlStyle + $htmlBody + $htmlScript + $htmlEnd
-        $fullHtml | Out-File -FilePath "$env:USERPROFILE\index.html" -Encoding UTF8
-        
-        Write-Host "✅ Веб-интерфейс создан"
+        Write-Host "🚀 Запускаем Cloudflare Tunnel..."
+        Start-Process -NoNewWindow -FilePath "$env:USERPROFILE\cloudflared.exe" -ArgumentList "tunnel --url http://localhost:6080"
 
-    - name: Setup Python HTTP Server
-      run: |
-        Write-Host "🐍 Настраиваем Python HTTP сервер..."
-        
-        # Python уже установлен в GitHub Actions
-        python -m pip install --upgrade pip
-        
-        # Запускаем HTTP сервер для Guacamole интерфейса
-        $serverJob = Start-Job -ScriptBlock {
-            Set-Location $env:USERPROFILE
-            python -m http.server 8080
-        }
-        
-        Start-Sleep -Seconds 10
-        
-        # Проверяем что сервер работает
-        try {
-            $response = Invoke-WebRequest -Uri "http://localhost:8080/guacamole.html" -TimeoutSec 5
-            Write-Host "✅ HTTP сервер работает: $($response.StatusCode)"
-        } catch {
-            Write-Host "❌ Ошибка HTTP сервера: $($_.Exception.Message)"
-        }
-        
-        Write-Host "✅ Python HTTP сервер запущен на порту 8080"
-
-    - name: Download and Setup Cloudflare Tunnel
-      run: |
-        Write-Host "☁️ Скачиваем Cloudflare Tunnel (cloudflared)..."
-        Invoke-WebRequest -Uri "https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-windows-amd64.exe" -OutFile "$env:USERPROFILE\cloudflared.exe"
-        
-        Write-Host "✅ Cloudflared готов!"
-
-    - name: System Setup and User Configuration
-      run: |
-        Write-Host "⚙️ Настраиваем систему..."
-        
-        # Создаем пользователя для RDP
-        Write-Host "👤 Настраиваем пользователя..."
-        Set-LocalUser -Name "runneradmin" -Password (ConvertTo-SecureString -AsPlainText "Desktop2024!" -Force)
-        
-        # Настройка автологина
-        Write-Host "🔐 Настраиваем автологин..."
-        Set-ItemProperty -Path "HKLM:\SOFTWARE\Microsoft\Windows NT\CurrentVersion\Winlogon" -Name "AutoAdminLogon" -Value "1" -Type String
-        Set-ItemProperty -Path "HKLM:\SOFTWARE\Microsoft\Windows NT\CurrentVersion\Winlogon" -Name "DefaultUserName" -Value "runneradmin" -Type String
-        Set-ItemProperty -Path "HKLM:\SOFTWARE\Microsoft\Windows NT\CurrentVersion\Winlogon" -Name "DefaultPassword" -Value "Desktop2024!" -Type String
-        
-        # Отключаем экран блокировки
-        Write-Host "🖥️ Отключаем блокировку экрана..."
-        try {
-            New-Item -Path "HKLM:\SOFTWARE\Policies\Microsoft\Windows" -Name "Personalization" -Force -ErrorAction SilentlyContinue
-            Set-ItemProperty -Path "HKLM:\SOFTWARE\Policies\Microsoft\Windows\Personalization" -Name "NoLockScreen" -Value 1 -Type DWord -Force -ErrorAction SilentlyContinue
-        } catch {
-            Write-Host "⚠️ Не удалось отключить блокировку экрана: $($_.Exception.Message)"
-        }
-        
-        # Настройка дисплея
-        Write-Host "🖼️ Настраиваем разрешение экрана..."
-        Add-Type -AssemblyName System.Windows.Forms
-        $screen = [System.Windows.Forms.Screen]::PrimaryScreen
-        Write-Host "Текущее разрешение: $($screen.Bounds.Width)x$($screen.Bounds.Height)"
-        
-        Write-Host "⌨️ Добавляем русскую раскладку..."
-        try {
-            $inputLanguageID = New-WinUserLanguageList -Language "ru-RU"
-            $inputLanguageID += New-WinUserLanguageList -Language "en-US"
-            Set-WinUserLanguageList -LanguageList $inputLanguageID -Force
-        } catch {
-            Write-Host "⚠️ Ошибка настройки языка: $($_.Exception.Message)"
-        }
-        
-        Write-Host "✅ Система настроена!"
-
-    - name: Verify RDP Server
-      run: |
-        Write-Host "🔍 Проверяем RDP сервер..."
-        
-        # Проверяем что RDP слушает порт 3389
-        $rdpPort = Get-NetTCPConnection -LocalPort 3389 -ErrorAction SilentlyContinue
-        if ($rdpPort) {
-            Write-Host "✅ RDP сервер работает на порту 3389"
-        } else {
-            Write-Host "❌ RDP сервер не слушает порт 3389"
-            Write-Host "🔄 Перезапускаем RDP сервис..."
-            Restart-Service -Name "TermService" -Force
-            Start-Sleep -Seconds 10
-        }
-        
-        # Проверяем HTTP сервер
-        $httpPort = Get-NetTCPConnection -LocalPort 8080 -ErrorAction SilentlyContinue
-        if ($httpPort) {
-            Write-Host "✅ HTTP сервер работает на порту 8080"
-        } else {
-            Write-Host "❌ HTTP сервер не работает на порту 8080"
-        }
-
-    - name: Start Cloudflare Tunnel and Keep Alive
-      run: |
-        Write-Host "☁️ Запускаем Cloudflare Tunnel..."
-        
-        # Запускаем cloudflared туннель в фоне
-        Write-Host "🔗 Создаем туннель на trycloudflare.com..."
-        $logFile = "$env:TEMP\cloudflared.log"
-        
-        # Запускаем в фоне с логированием
-        $tunnelJob = Start-Job -ScriptBlock {
-            param($cloudflaredPath, $logPath)
-            & $cloudflaredPath tunnel --url http://localhost:8080 2>&1 | Tee-Object -FilePath $logPath
-        } -ArgumentList "$env:USERPROFILE\cloudflared.exe", $logFile
-        
-        Start-Sleep -Seconds 30
-        
-        # Проверяем статус tunnel job
-        $jobState = Get-Job -Id $tunnelJob.Id | Select-Object -ExpandProperty State
-        if ($jobState -eq "Running") {
-            Write-Host "✅ Cloudflare туннель успешно запущен!"
-        } else {
-            Write-Host "❌ Ошибка запуска Cloudflare Tunnel"
-        }
-        
-        # Получаем URL туннеля (несколько попыток)
-        $tunnelUrl = $null
-        for ($i = 1; $i -le 8; $i++) {
-            Write-Host "🔍 Попытка $i получить URL туннеля..."
-            
-            # Проверяем вывод job
-            $tunnelOutput = Receive-Job -Id $tunnelJob.Id -Keep
-            if ($tunnelOutput) {
-                $tunnelOutput | ForEach-Object { 
-                    Write-Host $_
-                    if ($_ -match "https://[a-zA-Z0-9\-]+\.trycloudflare\.com") {
-                        $tunnelUrl = $matches[0]
-                        Write-Host "🎯 Найден URL в job: $tunnelUrl"
-                    }
-                }
-            }
-            
-            # Проверяем лог файл
-            if (Test-Path $logFile) {
-                $logContent = Get-Content $logFile -ErrorAction SilentlyContinue
-                if ($logContent) {
-                    $logContent | ForEach-Object { 
-                        if ($_ -match "https://[a-zA-Z0-9\-]+\.trycloudflare\.com") {
-                            $tunnelUrl = $matches[0]
-                            Write-Host "🎯 Найден URL в логе: $tunnelUrl"
-                        }
-                    }
-                }
-            }
-            
-            if ($tunnelUrl) { break }
-            Start-Sleep -Seconds 15
-        }
-        
-        if (-not $tunnelUrl) {
-            Write-Host "⚠️ URL не найден, показываем все логи:"
-            Write-Host "📋 Вывод Job:"
-            Receive-Job -Id $tunnelJob.Id -Keep | ForEach-Object { Write-Host $_ }
-            if (Test-Path $logFile) {
-                Write-Host "📋 Содержимое лог файла:"
-                Get-Content $logFile | ForEach-Object { Write-Host $_ }
-            }
-        }
-        
-        # Выводим информацию для подключения
-        Write-Host ""
-        Write-Host "=" * 70
-        Write-Host "🌐 ИНФОРМАЦИЯ ДЛЯ ПОДКЛЮЧЕНИЯ К WINDOWS DESKTOP"
-        Write-Host "=" * 70
-        if ($tunnelUrl) {
-            Write-Host "🔗 ПРЯМАЯ ССЫЛКА: $tunnelUrl"
-            Write-Host "🎯 Скопируйте эту ссылку и откройте в браузере!"
-        } else {
-            Write-Host "🔗 Веб-интерфейс: Смотрите URL выше в логах Cloudflare"
-            Write-Host "🔗 Откройте URL в браузере"
-        }
-        Write-Host ""
-        Write-Host "📋 Данные для RDP подключения:"
-        Write-Host "🌐 Сервер: localhost:3389 (через туннель)"
-        Write-Host "👤 Windows Пользователь: runneradmin"
-        Write-Host "🔑 Windows Пароль: Desktop2024!"
-        Write-Host ""
-        Write-Host "💻 Откройте URL в браузере для веб-интерфейса"
-        Write-Host "🖥️ Или используйте любой RDP клиент"
-        Write-Host "🎮 Полная поддержка звука, клавиатуры и мыши"
-        Write-Host "🌍 Работает в любом браузере и на мобильных устройствах"
-        Write-Host "=" * 70
-        Write-Host ""
-        
-        Write-Host "⏰ Поддерживаем работу туннеля..."
-        Write-Host "🛑 Для остановки прервите выполнение workflow"
-        Write-Host "📊 Туннель будет работать бесконечно"
-        
-        # Основной цикл поддержания работы (бесконечный)
-        $startTime = Get-Date
-        $lastCheck = Get-Date
-        
-        while ($true) {
-            try {
-                # Проверяем каждые 3 минуты
-                if ((Get-Date) - $lastCheck -gt (New-TimeSpan -Minutes 3)) {
-                    
-                    # Проверяем Cloudflare tunnel
-                    $currentTunnelState = Get-Job -Id $tunnelJob -ErrorAction SilentlyContinue | Select-Object -ExpandProperty State
-                    if ($currentTunnelState -ne "Running") {
-                        Write-Host "⚠️ Cloudflare tunnel остановлен, перезапускаем..."
-                        Remove-Job -Id $tunnelJob -Force -ErrorAction SilentlyContinue
-                        
-                        # Перезапускаем туннель
-                        $tunnelJob = Start-Job -ScriptBlock {
-                            param($cloudflaredPath, $logPath)
-                            & $cloudflaredPath tunnel --url http://localhost:8080 2>&1 | Tee-Object -FilePath $logPath
-                        } -ArgumentList "$env:USERPROFILE\cloudflared.exe", $logFile
-                        
-                        Start-Sleep -Seconds 20
-                        
-                        # Показываем новый URL
-                        $newOutput = Receive-Job -Id $tunnelJob -Keep
-                        if ($newOutput) {
-                            Write-Host "🔗 Новый вывод Cloudflare:"
-                            $newOutput | ForEach-Object { 
-                                Write-Host $_
-                                if ($_ -match "https://[a-zA-Z0-9\-]+\.trycloudflare\.com") {
-                                    Write-Host "🎯 Новый URL: $($matches[0])"
-                                }
-                            }
-                        }
-                    }
-                    
-                    # Проверяем RDP сервер
-                    $rdpPort = Get-NetTCPConnection -LocalPort 3389 -ErrorAction SilentlyContinue
-                    if (-not $rdpPort) {
-                        Write-Host "⚠️ RDP Server остановлен, перезапускаем..."
-                        Start-Service -Name "TermService" -ErrorAction SilentlyContinue
-                    }
-                    
-                    # Проверяем HTTP сервер
-                    $httpPort = Get-NetTCPConnection -LocalPort 8080 -ErrorAction SilentlyContinue
-                    if (-not $httpPort) {
-                        Write-Host "⚠️ HTTP сервер остановлен на порту 8080"
-                    } else {
-                        Write-Host "✅ Все сервисы работают"
-                    }
-                    
-                    $lastCheck = Get-Date
-                    Write-Host "✅ Проверка завершена - $(Get-Date -Format 'HH:mm:ss')"
-                }
-                
-                Start-Sleep -Seconds 45
-                
-            } catch {
-                Write-Host "❌ Ошибка в цикле мониторинга: $($_.Exception.Message)"
-                Start-Sleep -Seconds 60
-            }
-        }
-        
-        # Этот код никогда не выполнится, так как цикл бесконечный
-        Write-Host "⏰ Завершаем работу..."
-        Remove-Job -Id $tunnelJob -Force -ErrorAction SilentlyContinue
+        Write-Host "🌐 Ожидаем ссылку .trycloudflare.com в логах cloudflared..."
+        Start-Sleep -Seconds 99999
