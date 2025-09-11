@@ -35,7 +35,8 @@ jobs:
     - name: Start VNC + noVNC + Cloudflare Tunnel
       run: |
         Write-Host "🚀 Запускаем VNC сервер..."
-        Start-Process -NoNewWindow tightvncserver
+        & "C:\Program Files\TightVNC\tvnserver.exe" -controlapp -password 123456
+        & "C:\Program Files\TightVNC\tvnserver.exe" -run
 
         Write-Host "🚀 Запускаем noVNC..."
         Start-Process -NoNewWindow "python" -ArgumentList "$env:USERPROFILE\novnc\noVNC-master\utils\novnc_proxy", "--vnc", "localhost:5900", "--listen", "6080"
@@ -43,7 +44,4 @@ jobs:
         Start-Sleep -Seconds 5
 
         Write-Host "🚀 Запускаем Cloudflare Tunnel..."
-        Start-Process -NoNewWindow -FilePath "$env:USERPROFILE\cloudflared.exe" -ArgumentList "tunnel --url http://localhost:6080"
-
-        Write-Host "🌐 Ожидаем ссылку .trycloudflare.com в логах cloudflared..."
-        Start-Sleep -Seconds 99999
+        & "$env:USERPROFILE\cloudflared.exe" tunnel --url http://localhost:6080
