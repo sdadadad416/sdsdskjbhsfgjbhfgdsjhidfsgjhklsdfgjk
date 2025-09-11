@@ -1,0 +1,261 @@
+name: Free Windows Desktop with NoVNC + Cloudflare Tunnel
+
+on: workflow_dispatch
+
+jobs:
+  setup-novnc-tunnel:
+    runs-on: windows-latest
+    steps:
+    - name: Check out the repository
+      uses: actions/checkout@v2
+
+    - name: Download and Setup TightVNC Server
+      run: |
+        Write-Host "📥 Скачиваем TightVNC Server..."
+        Invoke-WebRequest -Uri "https://www.tightvnc.com/download/2.8.85/tightvnc-2.8.85-gpl-setup-64bit.msi" -OutFile "$env:TEMP\tightvnc.msi"
+        
+        Write-Host "📦 Устанавливаем TightVNC Server..."
+        Start-Process msiexec.exe -Wait -ArgumentList '/i', "$env:TEMP\tightvnc.msi", '/quiet', '/norestart', 'ADDLOCAL=Server', 'SERVER_REGISTER_AS_SERVICE=1', 'SERVER_ADD_FIREWALL_EXCEPTION=1', 'SET_USEVNCAUTHENTICATION=1', 'VALUE_OF_USEVNCAUTHENTICATION=1', 'SET_PASSWORD=1', 'VALUE_OF_PASSWORD=vnc123456', 'SET_USECONTROLAUTHENTICATION=1', 'VALUE_OF_USECONTROLAUTHENTICATION=1', 'SET_CONTROLPASSWORD=1', 'VALUE_OF_CONTROLPASSWORD=admin123456'
+        
+        Write-Host "✅ TightVNC Server установлен!"
+        Start-Sleep -Seconds 5
+
+    - name: Download and Setup NoVNC
+      run: |
+        Write-Host "📥 Скачиваем NoVNC..."
+        Invoke-WebRequest -Uri "https://github.com/novnc/noVNC/archive/refs/tags/v1.4.0.zip" -OutFile "$env:TEMP\novnc.zip"
+        
+        Write-Host "📦 Распаковываем NoVNC..."
+        Expand-Archive -Path "$env:TEMP\novnc.zip" -DestinationPath "$env:USERPROFILE" -Force
+        Rename-Item -Path "$env:USERPROFILE\noVNC-1.4.0" -NewName "novnc" -Force
+        
+        Write-Host "📥 Скачиваем websockify..."
+        Invoke-WebRequest -Uri "https://github.com/novnc/websockify/archive/refs/tags/v0.11.0.zip" -OutFile "$env:TEMP\websockify.zip"
+        Expand-Archive -Path "$env:TEMP\websockify.zip" -DestinationPath "$env:USERPROFILE" -Force
+        Rename-Item -Path "$env:USERPROFILE\websockify-0.11.0" -NewName "websockify" -Force
+        
+        Write-Host "✅ NoVNC настроен!"
+
+    - name: Install Python and Setup Websockify
+      run: |
+        Write-Host "🐍 Устанавливаем Python..."
+        Invoke-WebRequest -Uri "https://www.python.org/ftp/python/3.11.9/python-3.11.9-amd64.exe" -OutFile "$env:TEMP\python.exe"
+        Start-Process -FilePath "$env:TEMP\python.exe" -ArgumentList "/quiet", "InstallAllUsers=1", "PrependPath=1", "Include_test=0" -Wait
+        
+        # Обновляем PATH
+        $env:PATH = [System.Environment]::GetEnvironmentVariable("PATH","Machine") + ";" + [System.Environment]::GetEnvironmentVariable("PATH","User")
+        
+        Write-Host "📦 Устанавливаем зависимости..."
+        python -m pip install --upgrade pip
+        python -m pip install numpy
+        
+        Write-Host "✅ Python настроен!"
+
+    - name: Download and Setup Cloudflare Tunnel
+      run: |
+        Write-Host "☁️ Скачиваем Cloudflare Tunnel (cloudflared)..."
+        Invoke-WebRequest -Uri "https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-windows-amd64.exe" -OutFile "$env:USERPROFILE\cloudflared.exe"
+        
+        Write-Host "✅ Cloudflared готов!"
+
+    - name: System Setup and User Configuration
+      run: |
+        Write-Host "⚙️ Настраиваем систему..."
+        
+        # Создаем пользователя для VNC
+        Write-Host "👤 Настраиваем пользователя..."
+        Set-LocalUser -Name "runneradmin" -Password (ConvertTo-SecureString -AsPlainText "Desktop2024!" -Force)
+        
+        # Настройка автологина
+        Write-Host "🔐 Настраиваем автологин..."
+        Set-ItemProperty -Path "HKLM:\SOFTWARE\Microsoft\Windows NT\CurrentVersion\Winlogon" -Name "AutoAdminLogon" -Value "1" -Type String
+        Set-ItemProperty -Path "HKLM:\SOFTWARE\Microsoft\Windows NT\CurrentVersion\Winlogon" -Name "DefaultUserName" -Value "runneradmin" -Type String
+        Set-ItemProperty -Path "HKLM:\SOFTWARE\Microsoft\Windows NT\CurrentVersion\Winlogon" -Name "DefaultPassword" -Value "Desktop2024!" -Type String
+        
+        # Отключаем экран блокировки
+        Write-Host "🖥️ Отключаем блокировку экрана..."
+        Set-ItemProperty -Path "HKLM:\SOFTWARE\Policies\Microsoft\Windows\Personalization" -Name "NoLockScreen" -Value 1 -Type DWord -Force
+        New-Item -Path "HKLM:\SOFTWARE\Policies\Microsoft\Windows\Personalization" -Force -ErrorAction SilentlyContinue
+        Set-ItemProperty -Path "HKLM:\SOFTWARE\Policies\Microsoft\Windows\Personalization" -Name "NoLockScreen" -Value 1 -Type DWord
+        
+        # Настройка дисплея
+        Write-Host "🖼️ Настраиваем разрешение экрана..."
+        Add-Type -AssemblyName System.Windows.Forms
+        $screen = [System.Windows.Forms.Screen]::PrimaryScreen
+        Write-Host "Текущее разрешение: $($screen.Bounds.Width)x$($screen.Bounds.Height)"
+        
+        Write-Host "⌨️ Добавляем русскую раскладку..."
+        try {
+            $inputLanguageID = New-WinUserLanguageList -Language "ru-RU"
+            $inputLanguageID += New-WinUserLanguageList -Language "en-US"
+            Set-WinUserLanguageList -LanguageList $inputLanguageID -Force
+        } catch {
+            Write-Host "⚠️ Ошибка настройки языка: $($_.Exception.Message)"
+        }
+        
+        Write-Host "✅ Система настроена!"
+
+    - name: Start VNC Server
+      run: |
+        Write-Host "🖥️ Запускаем VNC Server..."
+        
+        # Запускаем VNC сервер
+        Start-Service -Name "tvnserver" -ErrorAction SilentlyContinue
+        
+        # Альтернативный запуск если сервис не работает
+        if ((Get-Service -Name "tvnserver" -ErrorAction SilentlyContinue).Status -ne "Running") {
+            Write-Host "⚠️ Запускаем VNC вручную..."
+            Start-Process -FilePath "C:\Program Files\TightVNC\tvnserver.exe" -ArgumentList "-run" -WindowStyle Hidden
+        }
+        
+        Start-Sleep -Seconds 10
+        
+        # Проверяем что VNC слушает порт 5900
+        $vnc = Get-NetTCPConnection -LocalPort 5900 -ErrorAction SilentlyContinue
+        if ($vnc) {
+            Write-Host "✅ VNC Server запущен на порту 5900"
+        } else {
+            Write-Host "❌ VNC Server не запустился, пробуем еще раз..."
+            Start-Process -FilePath "C:\Program Files\TightVNC\tvnserver.exe" -ArgumentList "-controlservice", "-start" -Wait
+        }
+
+    - name: Start NoVNC Websockify
+      run: |
+        Write-Host "🌐 Запускаем NoVNC websockify..."
+        
+        # Обновляем PATH для Python
+        $env:PATH = [System.Environment]::GetEnvironmentVariable("PATH","Machine") + ";" + [System.Environment]::GetEnvironmentVariable("PATH","User")
+        
+        # Запускаем websockify в фоне
+        $websockifyJob = Start-Job -ScriptBlock {
+            Set-Location "$env:USERPROFILE\websockify"
+            python websockify.py --web="$env:USERPROFILE\novnc" 6080 localhost:5900
+        }
+        
+        Start-Sleep -Seconds 15
+        
+        # Проверяем статус
+        $jobState = Get-Job -Id $websockifyJob.Id | Select-Object -ExpandProperty State
+        if ($jobState -eq "Running") {
+            Write-Host "✅ NoVNC websockify запущен на порту 6080!"
+        } else {
+            Write-Host "❌ Ошибка запуска websockify"
+            Receive-Job -Id $websockifyJob.Id
+        }
+        
+        # Проверяем что websockify слушает порт 6080
+        Start-Sleep -Seconds 5
+        $websocket = Get-NetTCPConnection -LocalPort 6080 -ErrorAction SilentlyContinue
+        if ($websocket) {
+            Write-Host "✅ Websockify слушает порт 6080"
+        }
+
+    - name: Start Cloudflare Tunnel and Keep Alive
+      run: |
+        Write-Host "☁️ Запускаем Cloudflare Tunnel..."
+        
+        # Запускаем cloudflared туннель в фоне
+        Write-Host "🔗 Создаем туннель на trycloudflare.com..."
+        $tunnelJob = Start-Job -ScriptBlock {
+            & "$env:USERPROFILE\cloudflared.exe" tunnel --url http://localhost:6080
+        }
+        
+        Start-Sleep -Seconds 20
+        
+        # Проверяем статус tunnel job
+        $jobState = Get-Job -Id $tunnelJob.Id | Select-Object -ExpandProperty State
+        if ($jobState -eq "Running") {
+            Write-Host "✅ Cloudflare туннель успешно запущен!"
+            
+            # Получаем URL туннеля
+            $tunnelOutput = Receive-Job -Id $tunnelJob.Id -Keep
+            if ($tunnelOutput) {
+                Write-Host "📋 Вывод Cloudflare Tunnel:"
+                $tunnelOutput | ForEach-Object { 
+                    Write-Host $_
+                    if ($_ -match "https://.*\.trycloudflare\.com") {
+                        $global:tunnelUrl = $matches[0]
+                    }
+                }
+            }
+        } else {
+            Write-Host "❌ Ошибка запуска Cloudflare Tunnel"
+            Receive-Job -Id $tunnelJob.Id
+        }
+        
+        # Выводим информацию для подключения
+        Write-Host ""
+        Write-Host "=" * 60
+        Write-Host "🌐 ИНФОРМАЦИЯ ДЛЯ ПОДКЛЮЧЕНИЯ К DESKTOP"
+        Write-Host "=" * 60
+        Write-Host "🔗 Веб-интерфейс: Смотрите URL выше в логах Cloudflare"
+        Write-Host "🔗 Формат: https://[random].trycloudflare.com"
+        Write-Host "🔐 VNC Пароль: vnc123456"
+        Write-Host "👤 Windows Пользователь: runneradmin"
+        Write-Host "🔑 Windows Пароль: Desktop2024!"
+        Write-Host "💻 Откройте URL в браузере для доступа к рабочему столу"
+        Write-Host "🎮 Полная поддержка клавиатуры и мыши"
+        Write-Host "=" * 60
+        Write-Host ""
+        
+        Write-Host "⏰ Поддерживаем работу туннеля..."
+        Write-Host "🛑 Для остановки прервите выполнение workflow"
+        Write-Host "📊 Туннель будет работать в течение ~6 часов"
+        
+        # Основной цикл поддержания работы
+        $startTime = Get-Date
+        $maxRunTime = New-TimeSpan -Hours 5 -Minutes 50
+        $lastCheck = Get-Date
+        
+        while ((Get-Date) - $startTime -lt $maxRunTime) {
+            try {
+                # Проверяем каждые 3 минуты
+                if ((Get-Date) - $lastCheck -gt (New-TimeSpan -Minutes 3)) {
+                    
+                    # Проверяем Cloudflare tunnel
+                    $currentTunnelState = Get-Job -Id $tunnelJob -ErrorAction SilentlyContinue | Select-Object -ExpandProperty State
+                    if ($currentTunnelState -ne "Running") {
+                        Write-Host "⚠️ Cloudflare tunnel остановлен, перезапускаем..."
+                        Remove-Job -Id $tunnelJob -Force -ErrorAction SilentlyContinue
+                        
+                        $tunnelJob = Start-Job -ScriptBlock {
+                            & "$env:USERPROFILE\cloudflared.exe" tunnel --url http://localhost:6080
+                        }
+                        Start-Sleep -Seconds 15
+                        
+                        # Показываем новый URL
+                        $newOutput = Receive-Job -Id $tunnelJob -Keep
+                        if ($newOutput) {
+                            Write-Host "🔗 Новый URL Cloudflare:"
+                            $newOutput | ForEach-Object { Write-Host $_ }
+                        }
+                    }
+                    
+                    # Проверяем VNC сервер
+                    $vncPort = Get-NetTCPConnection -LocalPort 5900 -ErrorAction SilentlyContinue
+                    if (-not $vncPort) {
+                        Write-Host "⚠️ VNC Server остановлен, перезапускаем..."
+                        Start-Process -FilePath "C:\Program Files\TightVNC\tvnserver.exe" -ArgumentList "-controlservice", "-start" -Wait
+                    }
+                    
+                    # Проверяем websockify
+                    $websocketPort = Get-NetTCPConnection -LocalPort 6080 -ErrorAction SilentlyContinue
+                    if (-not $websocketPort) {
+                        Write-Host "⚠️ Websockify остановлен, перезапускаем..."
+                        # Здесь можно добавить перезапуск websockify если нужно
+                    }
+                    
+                    $lastCheck = Get-Date
+                    Write-Host "✅ Проверка завершена - $(Get-Date -Format 'HH:mm:ss')"
+                }
+                
+                Start-Sleep -Seconds 45
+                
+            } catch {
+                Write-Host "❌ Ошибка в цикле мониторинга: $($_.Exception.Message)"
+                Start-Sleep -Seconds 60
+            }
+        }
+        
+        Write-Host "⏰ Время выполнения истекло, завершаем работу..."
+        Remove-Job -Id $tunnelJob -Force -ErrorAction SilentlyContinue
