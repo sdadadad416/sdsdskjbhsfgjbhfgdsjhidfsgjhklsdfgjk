@@ -8,14 +8,21 @@ jobs:
     steps:
     - name: Setup VNC Server
       run: |
-        Write-Host "📥 Скачиваем TigerVNC..."
-        Invoke-WebRequest -Uri "https://github.com/TigerVNC/tigervnc/releases/download/v1.13.1/tigervnc64-1.13.1.exe" -OutFile "tigervnc.exe"
+        Write-Host "📥 Устанавливаем VNC через Chocolatey..."
+        Set-ExecutionPolicy Bypass -Scope Process -Force
+        [System.Net.ServicePointManager]::SecurityProtocol = [System.Net.ServicePointManager]::SecurityProtocol -bor 3072
+        iex ((New-Object System.Net.WebClient).DownloadString('https://community.chocolatey.org/install.ps1'))
         
-        Write-Host "🖥️ Устанавливаем TigerVNC..."
-        Start-Process tigervnc.exe -Wait -ArgumentList '/S'
+        Write-Host "🖥️ Устанавливаем UltraVNC..."
+        choco install ultravnc -y --force
+        
+        Write-Host "🔧 Настраиваем VNC..."
+        reg add "HKLM\SOFTWARE\ORL\WinVNC3\Default" /v "Password" /t REG_BINARY /d "238e24758cc8140d" /f
+        reg add "HKLM\SOFTWARE\ORL\WinVNC3\Default" /v "AllowLoopback" /t REG_DWORD /d "1" /f
         
         Write-Host "🚀 Запускаем VNC сервер..."
-        Start-Process "C:\Program Files\TigerVNC\vncserver.exe" -ArgumentList ":1 -geometry 1920x1080 -depth 24 -SecurityTypes None" -WindowStyle Hidden
+        Start-Process "C:\Program Files\uvnc bvba\UltraVNC\winvnc.exe" -ArgumentList "-install" -Wait
+        net start uvnc_service
         Start-Sleep -Seconds 10
 
     - name: Setup noVNC
@@ -37,7 +44,7 @@ jobs:
       run: |
         Write-Host "🚀 Запускаем websockify для VNC..."
         Start-Job -ScriptBlock {
-            websockify --web=C:\noVNC 6080 localhost:5901
+            websockify --web=C:\noVNC 6080 localhost:5900
         }
         
         Start-Sleep -Seconds 15
@@ -54,7 +61,7 @@ jobs:
             if ($content -match "https://[^/\s]+\.trycloudflare\.com") {
                 $tunnelUrl = $matches[0]
                 Write-Host "🌐 URL: $tunnelUrl"
-                Write-Host "🔐 Без пароля (SecurityTypes None)"
+                Write-Host "🔐 VNC пароль: 123456"
                 Write-Host "💡 Откройте URL в браузере"
             } else {
                 Write-Host "⚠️ Проверяем логи..."
