@@ -1,0 +1,194 @@
+name: Free RDP with Bore
+
+on: workflow_dispatch
+
+jobs:
+  setup-rdp-tunnel:
+    runs-on: windows-11-arm
+    steps:
+    - name: Check out the repository
+      uses: actions/checkout@v2
+
+    - name: Download and Install Bore
+      run: |
+        Write-Host "📥 Скачиваем Bore для Windows..."
+        Invoke-WebRequest -Uri "https://github.com/ekzhang/bore/releases/download/v0.5.0/bore-v0.5.0-x86_64-pc-windows-msvc.zip" -OutFile "$env:USERPROFILE\bore.zip"
+        
+        Write-Host "📦 Распаковываем Bore..."
+        Expand-Archive -Path "$env:USERPROFILE\bore.zip" -DestinationPath "$env:USERPROFILE\bore" -Force
+        
+        Write-Host "🔧 Настраиваем Bore..."
+        Move-Item -Path "$env:USERPROFILE\bore\bore.exe" -Destination "$env:USERPROFILE\bore.exe" -Force
+        
+        Write-Host "✅ Bore установлен успешно!"
+        Start-Sleep -Seconds 3
+
+    - name: Enable Remote Desktop (RDP) and Sound with Full Settings
+      run: |
+        Write-Host "🖥️ Настраиваем RDP сервер..."
+        
+        # Полная настройка RDP
+        Set-ItemProperty -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server' -Name "fDenyTSConnections" -Value 0
+        Set-ItemProperty -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server\WinStations\RDP-Tcp' -Name "UserAuthentication" -Value 1
+        
+        # Настройка брандмауэра
+        Enable-NetFirewallRule -DisplayGroup "Remote Desktop"
+        New-NetFirewallRule -DisplayName "Allow RDP" -Direction Inbound -Protocol TCP -LocalPort 3389 -Action Allow
+        
+        # Включение звука
+        Set-ItemProperty -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server\WinStations\RDP-Tcp' -Name "fDisableAudio" -Value 0
+        Start-Service -Name "Audiosrv" -ErrorAction SilentlyContinue
+        Set-Service -Name "Audiosrv" -StartupType Automatic -ErrorAction SilentlyContinue
+        
+        # Включение сервиса терминалов
+        Start-Service -Name "TermService" -ErrorAction SilentlyContinue
+        Set-Service -Name "TermService" -StartupType Automatic -ErrorAction SilentlyContinue
+        gpupdate /force
+        
+        Write-Host "✅ RDP настроен успешно!"
+
+    - name: Set RDP Password
+      run: |
+        Write-Host "🔐 Устанавливаем пароль для RDP..."
+        Set-LocalUser -Name "runneradmin" -Password (ConvertTo-SecureString -AsPlainText "Magisk2024!@#GitLab" -Force)
+        Write-Host "✅ Пароль установлен!"
+    
+    - name: System Setup
+      run: |
+        Write-Host "⚙️ Настраиваем систему..."
+        New-Item -Path "$env:USERPROFILE\Downloads" -ItemType Directory -Force
+        
+
+        
+
+        
+        Write-Host "⌨️ Добавляем русскую раскладку..."
+        try {
+            Set-ItemProperty -Path "HKCU:\Keyboard Layout\Preload" -Name "1" -Value "00000409" -Type String -ErrorAction SilentlyContinue
+            Set-ItemProperty -Path "HKCU:\Keyboard Layout\Substitutes" -Name "00000409" -Value "00000419" -Type String -ErrorAction SilentlyContinue
+            Set-ItemProperty -Path "HKCU:\Keyboard Layout\Toggle" -Name "Hotkey" -Value "1" -Type String -ErrorAction SilentlyContinue
+            Set-ItemProperty -Path "HKCU:\Keyboard Layout\Toggle" -Name "Language Hotkey" -Value "1" -Type String -ErrorAction SilentlyContinue
+            Set-ItemProperty -Path "HKCU:\Keyboard Layout\Toggle" -Name "Layout Hotkey" -Value "3" -Type String -ErrorAction SilentlyContinue
+        } catch {
+            Write-Host "⚠️ Ошибка настройки раскладки: $($_.Exception.Message)"
+        }
+        
+        Write-Host "🎤 Включаем микрофон..."
+        try {
+            Set-ItemProperty -Path "HKCU:\Software\Microsoft\Windows\CurrentVersion\CapabilityAccessManager\ConsentStore\microphone" -Name "Value" -Value "Allow" -Type String -ErrorAction SilentlyContinue
+        } catch {
+            Write-Host "⚠️ Ошибка настройки микрофона: $($_.Exception.Message)"
+        }
+        
+        Write-Host "✅ Настройка системы завершена!"
+
+    - name: Start Bore Tunnel and Keep Alive
+      run: |
+        Write-Host "🚀 Запускаем Bore туннель для RDP..."
+        
+        # Проверяем, что RDP работает
+        $rdpService = Get-Service -Name "TermService" -ErrorAction SilentlyContinue
+        if ($rdpService.Status -ne "Running") {
+            Write-Host "⚠️ RDP сервис не запущен, запускаем..."
+            Start-Service -Name "TermService" -ErrorAction SilentlyContinue
+        }
+        
+        # Запускаем Bore туннель в фоне с перенаправлением вывода
+        Write-Host "🔗 Создаем туннель на bore.pub..."
+        $boreJob = Start-Job -ScriptBlock {
+            & "$env:USERPROFILE\bore.exe" local 3389 --to bore.pub
+        }
+        
+        Start-Sleep -Seconds 15
+        
+        # Проверяем статус job
+        $jobState = Get-Job -Id $boreJob.Id | Select-Object -ExpandProperty State
+        if ($jobState -eq "Running") {
+            Write-Host "✅ Bore туннель успешно запущен в фоне!"
+            
+            # Пытаемся получить вывод для адреса
+            $jobOutput = Receive-Job -Id $boreJob.Id -Keep
+            if ($jobOutput) {
+                Write-Host "📋 Вывод Bore:"
+                $jobOutput | ForEach-Object { Write-Host $_ }
+            }
+        } else {
+            Write-Host "❌ Ошибка запуска Bore job, пробуем альтернативный способ..."
+            
+            # Альтернативный запуск через Start-Process
+            $boreProcess = Start-Process -FilePath "$env:USERPROFILE\bore.exe" -ArgumentList "local", "3389", "--to", "bore.pub" -WindowStyle Hidden -PassThru
+            Start-Sleep -Seconds 10
+            
+            if ($boreProcess -and !$boreProcess.HasExited) {
+                Write-Host "✅ Bore запущен через Start-Process!"
+            }
+        }
+        
+        # Выводим информацию для подключения
+        Write-Host ""
+        Write-Host "=" * 50
+        Write-Host "📋 ИНФОРМАЦИЯ ДЛЯ RDP ПОДКЛЮЧЕНИЯ"
+        Write-Host "=" * 50
+        Write-Host "👤 Имя пользователя: runneradmin"
+        Write-Host "🔐 Пароль: Magisk2024!@#GitLab"
+        Write-Host "� Локаольный порт: 3389"
+        Write-Host "🌐 Публичный адрес: bore.pub:[случайный_порт]"
+        Write-Host "💡 Адрес показан выше в логах Bore"
+        Write-Host "🖥️ Используйте любой RDP клиент для подключения"
+        Write-Host "=" * 50
+        Write-Host ""
+        
+        Write-Host "⏰ Поддерживаем работу туннеля..."
+        Write-Host "🛑 Для остановки прервите выполнение workflow"
+        Write-Host "📊 Туннель будет работать в течение ~6 часов"
+        
+        # Основной цикл поддержания работы
+        $startTime = Get-Date
+        $maxRunTime = New-TimeSpan -Hours 5 -Minutes 50
+        $lastCheck = Get-Date
+        
+        while ((Get-Date) - $startTime -lt $maxRunTime) {
+            try {
+                # Проверяем каждые 2 минуты
+                if ((Get-Date) - $lastCheck -gt (New-TimeSpan -Minutes 2)) {
+                    
+                    # Проверяем Bore job
+                    $currentJobState = Get-Job -Id $boreJob.Id -ErrorAction SilentlyContinue | Select-Object -ExpandProperty State
+                    if ($currentJobState -ne "Running") {
+                        Write-Host "⚠️ Bore job остановлен, перезапускаем..."
+                        Remove-Job -Id $boreJob.Id -Force -ErrorAction SilentlyContinue
+                        
+                        $boreJob = Start-Job -ScriptBlock {
+                            & "$env:USERPROFILE\bore.exe" local 3389 --to bore.pub
+                        }
+                        Start-Sleep -Seconds 10
+                        
+                        # Показываем новый адрес
+                        $newOutput = Receive-Job -Id $boreJob.Id -Keep
+                        if ($newOutput) {
+                            Write-Host "🔗 Новый адрес Bore:"
+                            $newOutput | ForEach-Object { Write-Host $_ }
+                        }
+                    }
+                    
+                    # Проверяем RDP сервис
+                    $rdpService = Get-Service -Name "TermService" -ErrorAction SilentlyContinue
+                    if ($rdpService.Status -ne "Running") {
+                        Write-Host "⚠️ RDP сервис остановлен, перезапускаем..."
+                        Start-Service -Name "TermService" -ErrorAction SilentlyContinue
+                    }
+                    
+                    $lastCheck = Get-Date
+                    Write-Host "✅ Проверка завершена - $(Get-Date -Format 'HH:mm:ss')"
+                }
+                
+                Start-Sleep -Seconds 30
+                
+            } catch {
+                Write-Host "❌ Ошибка в цикле мониторинга: $($_.Exception.Message)"
+                Start-Sleep -Seconds 60
+            }
+        }
+        
+        Write-Host "⏰ Время выполнения истекло, завершаем работу..."
+        Remove-Job -Id $boreJob.Id -Force -ErrorAction SilentlyContinue
