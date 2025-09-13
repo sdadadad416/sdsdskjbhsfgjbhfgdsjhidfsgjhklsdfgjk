@@ -21,8 +21,12 @@ jobs:
         reg add "HKLM\SOFTWARE\ORL\WinVNC3\Default" /v "AllowLoopback" /t REG_DWORD /d "1" /f
         
         Write-Host "🚀 Запускаем VNC сервер..."
-        Start-Process "C:\Program Files\uvnc bvba\UltraVNC\winvnc.exe" -ArgumentList "-install" -Wait
+        try {
+            net stop uvnc_service 2>$null
+        } catch {}
+        Start-Process "C:\Program Files\uvnc bvba\UltraVNC\winvnc.exe" -ArgumentList "-install" -Wait -ErrorAction SilentlyContinue
         net start uvnc_service
+        Write-Host "✅ VNC сервер запущен на порту 5900"
         Start-Sleep -Seconds 10
 
     - name: Setup noVNC
