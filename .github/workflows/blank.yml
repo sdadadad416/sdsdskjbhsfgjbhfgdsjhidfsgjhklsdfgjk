@@ -17,8 +17,10 @@ jobs:
         choco install ultravnc -y --force
         
         Write-Host "🔧 Настраиваем VNC..."
-        reg add "HKLM\SOFTWARE\ORL\WinVNC3\Default" /v "Password" /t REG_BINARY /d "238e24758cc8140d" /f
+        reg add "HKLM\SOFTWARE\ORL\WinVNC3\Default" /v "AuthRequired" /t REG_DWORD /d "0" /f
         reg add "HKLM\SOFTWARE\ORL\WinVNC3\Default" /v "AllowLoopback" /t REG_DWORD /d "1" /f
+        reg add "HKLM\SOFTWARE\ORL\WinVNC3\Default" /v "LoopbackOnly" /t REG_DWORD /d "0" /f
+        reg add "HKLM\SOFTWARE\ORL\WinVNC3\Default" /v "ConnectPriority" /t REG_DWORD /d "0" /f
         
         Write-Host "🚀 Запускаем VNC сервер..."
         try {
@@ -71,7 +73,7 @@ jobs:
             if ($content -match "https://[^/\s]+\.trycloudflare\.com") {
                 $tunnelUrl = $matches[0]
                 Write-Host "🌐 URL: $tunnelUrl"
-                Write-Host "🔐 VNC пароль: 123456"
+                Write-Host "🔐 Без пароля (AuthRequired=0)"
                 Write-Host "💡 Откройте URL в браузере"
             } else {
                 Write-Host "⚠️ Проверяем логи..."
