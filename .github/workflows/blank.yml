@@ -33,6 +33,7 @@ jobs:
             Write-Host "✅ VNC сервер запущен на порту 5900"
         }
         Start-Sleep -Seconds 10
+        exit 0
 
     - name: Setup noVNC
       run: |
