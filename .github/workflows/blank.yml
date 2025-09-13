@@ -17,23 +17,18 @@ jobs:
         choco install ultravnc -y --force
         
         Write-Host "🔧 Настраиваем VNC..."
-        reg add "HKLM\SOFTWARE\ORL\WinVNC3\Default" /v "AuthRequired" /t REG_DWORD /d "0" /f
+        reg add "HKLM\SOFTWARE\ORL\WinVNC3\Default" /v "Password" /t REG_BINARY /d "d85de593f7e48c4a" /f
         reg add "HKLM\SOFTWARE\ORL\WinVNC3\Default" /v "AllowLoopback" /t REG_DWORD /d "1" /f
         reg add "HKLM\SOFTWARE\ORL\WinVNC3\Default" /v "LoopbackOnly" /t REG_DWORD /d "0" /f
-        reg add "HKLM\SOFTWARE\ORL\WinVNC3\Default" /v "ConnectPriority" /t REG_DWORD /d "0" /f
+        reg add "HKLM\SOFTWARE\ORL\WinVNC3\Default" /v "AuthRequired" /t REG_DWORD /d "1" /f
         
         Write-Host "🚀 Запускаем VNC сервер..."
-        try {
-            net stop uvnc_service 2>$null
-        } catch {}
+        Write-Host "🔄 Перезапускаем VNC службу..."
+        net stop uvnc_service 2>$null
+        Start-Sleep -Seconds 3
         Start-Process "C:\Program Files\uvnc bvba\UltraVNC\winvnc.exe" -ArgumentList "-install" -Wait -ErrorAction SilentlyContinue
-        
-        $serviceStatus = net start uvnc_service 2>&1
-        if ($serviceStatus -like "*already*") {
-            Write-Host "✅ VNC служба уже запущена"
-        } else {
-            Write-Host "✅ VNC сервер запущен на порту 5900"
-        }
+        net start uvnc_service
+        Write-Host "✅ VNC сервер запущен с новыми настройками"
         Start-Sleep -Seconds 10
         exit 0
 
@@ -73,7 +68,7 @@ jobs:
             if ($content -match "https://[^/\s]+\.trycloudflare\.com") {
                 $tunnelUrl = $matches[0]
                 Write-Host "🌐 URL: $tunnelUrl"
-                Write-Host "🔐 Без пароля (AuthRequired=0)"
+                Write-Host "🔐 VNC пароль: password"
                 Write-Host "💡 Откройте URL в браузере"
             } else {
                 Write-Host "⚠️ Проверяем логи..."
