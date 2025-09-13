@@ -25,8 +25,13 @@ jobs:
             net stop uvnc_service 2>$null
         } catch {}
         Start-Process "C:\Program Files\uvnc bvba\UltraVNC\winvnc.exe" -ArgumentList "-install" -Wait -ErrorAction SilentlyContinue
-        net start uvnc_service
-        Write-Host "✅ VNC сервер запущен на порту 5900"
+        
+        $serviceStatus = net start uvnc_service 2>&1
+        if ($serviceStatus -like "*already*") {
+            Write-Host "✅ VNC служба уже запущена"
+        } else {
+            Write-Host "✅ VNC сервер запущен на порту 5900"
+        }
         Start-Sleep -Seconds 10
 
     - name: Setup noVNC
