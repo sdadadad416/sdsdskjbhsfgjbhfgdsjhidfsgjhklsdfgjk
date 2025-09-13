@@ -6,12 +6,15 @@ jobs:
   vnc-setup:
     runs-on: windows-latest
     steps:
-    - name: Enable RDP
+    - name: Setup VNC Server
       run: |
-        Write-Host "�️У Включаем RDP..."
-        Set-ItemProperty -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server' -Name "fDenyTSConnections" -Value 0
-        Enable-NetFirewallRule -DisplayGroup "Remote Desktop"
-        Set-LocalUser -Name "runneradmin" -Password (ConvertTo-SecureString -AsPlainText "123456" -Force)
+        Write-Host "📥 Устанавливаем TightVNC..."
+        Invoke-WebRequest -Uri "https://www.tightvnc.com/download/2.8.81/tightvnc-2.8.81-gpl-setup-64bit.msi" -OutFile "vnc.msi"
+        Start-Process msiexec.exe -Wait -ArgumentList '/i vnc.msi /quiet /norestart ADDLOCAL="Server" SERVER_REGISTER_AS_SERVICE=1 SET_USEVNCAUTHENTICATION=1 VALUE_OF_USEVNCAUTHENTICATION=1 SET_PASSWORD=1 VALUE_OF_PASSWORD=123456'
+        
+        Write-Host "🖥️ Запускаем VNC сервер..."
+        Start-Service tvnserver -ErrorAction SilentlyContinue
+        Start-Sleep -Seconds 5
 
     - name: Setup noVNC
       run: |
@@ -21,7 +24,7 @@ jobs:
         Rename-Item "C:\noVNC-master" "C:\noVNC"
         
         Write-Host "🐍 Устанавливаем websockify..."
-        pip install websockify numpy
+        pip install websockify
 
     - name: Setup Cloudflare Tunnel
       run: |
@@ -30,39 +33,38 @@ jobs:
 
     - name: Start Services and Tunnel
       run: |
-        Write-Host "🚀 Запускаем websockify для RDP..."
+        Write-Host "🚀 Запускаем websockify для VNC..."
         Start-Job -ScriptBlock {
-            websockify --web=C:\noVNC 6080 localhost:3389
+            websockify --web=C:\noVNC 6080 localhost:5900
         }
         
         Start-Sleep -Seconds 15
         
         Write-Host "🌐 Создаем Cloudflare туннель..."
-        $tunnel = Start-Process .\cloudflared.exe -ArgumentList "tunnel --url http://localhost:6080" -WindowStyle Hidden -PassThru -RedirectStandardOutput "tunnel.log"
+        Start-Process .\cloudflared.exe -ArgumentList "tunnel --url http://localhost:6080" -WindowStyle Hidden -PassThru -RedirectStandardOutput "tunnel.log"
         
         Start-Sleep -Seconds 20
         
-        Write-Host "📋 ДОСТУП К РАБОЧЕМУ СТОЛУ:"
-        Write-Host "=" * 50
+        Write-Host "📋 ДОСТУП К VNC:"
+        Write-Host "=" * 40
         if (Test-Path "tunnel.log") {
             $content = Get-Content "tunnel.log" -Raw
             if ($content -match "https://[^/\s]+\.trycloudflare\.com") {
                 $tunnelUrl = $matches[0]
                 Write-Host "🌐 URL: $tunnelUrl"
-                Write-Host "👤 Логин: runneradmin"  
-                Write-Host "🔐 Пароль: 123456"
-                Write-Host "💡 Откройте URL в браузере для доступа к рабочему столу"
+                Write-Host "🔐 VNC пароль: 123456"
+                Write-Host "💡 Откройте URL в браузере"
             } else {
-                Write-Host "⚠️ URL не найден в логах, проверьте tunnel.log"
+                Write-Host "⚠️ Проверяем логи..."
                 Get-Content "tunnel.log" | Write-Host
             }
         }
-        Write-Host "=" * 50
+        Write-Host "=" * 40
         
-        Write-Host "⏰ Поддерживаем туннель активным..."
+        Write-Host "⏰ Держим туннель активным..."
         for ($i = 1; $i -le 300; $i++) {
             Start-Sleep -Seconds 60
             if ($i % 5 -eq 0) {
-                Write-Host "✅ Туннель активен - $i минут"
+                Write-Host "✅ Активен $i мин"
             }
         }
